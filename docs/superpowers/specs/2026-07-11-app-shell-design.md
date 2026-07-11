@@ -41,14 +41,19 @@ brainstorm → spec → plan cycle later, built on top of this shell.
   modules will need.
 - **Tailwind CSS** — utility-first styling matched to the PRD's exact design
   tokens.
-- **shadcn/ui (Radix + Tailwind)** — accessible primitives (dropdown menu,
-  tooltip, etc.) for things like the sidebar profile menu, without
-  reinventing accessibility behavior.
 - **lucide-react** — icon set (matches the icon style used in the reference
   mockups).
-- **Framer Motion** — micro-animations and page transitions called for in the
-  PRD ("micro animações suaves", "transições rápidas").
 - **Inter** — typeface, standard for this category of product.
+
+No component library (shadcn/ui) or animation library (Framer Motion) in
+this phase: the only interactive primitive the shell needs is the sidebar
+profile dropdown, which is small enough to hand-roll (plain React state +
+outside-click/Escape handling) without pulling in Radix and a CLI-generated
+theming layer whose exact output shifts across versions. Tailwind's built-in
+`transition-colors` covers the shell's hover/active-state motion. Adopt
+shadcn/ui and/or Framer Motion later, in whichever module first needs richer
+primitives (forms, modals, drag-and-drop, step-wizard transitions) — likely
+Criador de Avatar or Calendário.
 
 ## Design system
 
@@ -149,14 +154,18 @@ network calls, no external services wired in this phase.
 
 ## Testing
 
-- `next build` and `tsc --noEmit` must pass (typecheck + build as the
-  correctness gate for this phase).
+- Vitest + React Testing Library for components that carry real logic:
+  active-route highlighting in the sidebar, the profile menu's open/close/
+  outside-click/Escape behavior, and that every module route renders its
+  title and skeleton. Purely compositional or config files (root layout,
+  Tailwind config, globals.css) aren't unit tested — they're covered by the
+  build.
+- `next build`, `tsc --noEmit`, and lint must pass (the correctness gate for
+  this phase, alongside the component tests).
 - Manual verification in-browser (per project convention for UI work):
   navigate to each of the 5 routes, confirm sidebar highlights the right
   item, confirm no route ever shows a blank screen, confirm layout doesn't
   break at common desktop widths (1280px, 1440px, 1920px).
-- No automated component tests yet — nothing here has real logic to test;
-  revisit once modules add real behavior.
 
 ## Open questions for later modules
 
