@@ -1,6 +1,7 @@
 node_modules/
 .next/
 .superpowers/
+.worktrees/
 *.log
 .env
 .env.local
