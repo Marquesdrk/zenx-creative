@@ -2,6 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* z-index: -1 relies on <body> having no own background paint (its
+   bg-background color propagates to the canvas instead) and no
+   positioning/transform/filter that would create a stacking context
+   above this layer. Adding any of those to <body> would hide the grid. */
 .grid-background {
   position: fixed;
   inset: 0;
