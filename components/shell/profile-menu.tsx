@@ -44,7 +44,7 @@ export function ProfileMenu() {
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 mb-2 w-full rounded-xl border border-border bg-card p-1 shadow-lg"
+          className="absolute bottom-full left-0 z-10 mb-2 w-full rounded-xl border border-border bg-[#141414] p-1 shadow-lg"
         >
           <button
             role="menuitem"
