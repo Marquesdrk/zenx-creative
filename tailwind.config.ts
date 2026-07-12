@@ -5,12 +5,15 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "var(--background)",
-        foreground: "var(--foreground)",
+        background: "#0A0A0A",
+        card: "rgba(255,255,255,0.04)",
+        "card-hover": "rgba(255,255,255,0.08)",
+        border: "rgba(255,255,255,0.10)",
+        accent: "#6C7BFF",
+        muted: "rgba(255,255,255,0.6)",
       },
       fontFamily: {
-        sans: ["var(--font-geist-sans)"],
-        mono: ["var(--font-geist-mono)"],
+        sans: ["var(--font-inter)", "sans-serif"],
       },
     },
   },
