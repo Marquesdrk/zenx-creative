@@ -23,7 +23,7 @@ export function VideoFrame({
             style={{ background: `linear-gradient(160deg, ${profile.avatarColor}33, #1a1a24)` }}
           >
             <div
-              className="h-10 w-10 rounded-full"
+              className="h-[22%] w-[22%] rounded-full"
               style={{ backgroundColor: profile.avatarColor }}
             />
           </div>
@@ -32,19 +32,19 @@ export function VideoFrame({
       )}
 
       {template === "twitter-style" && (
-        <div className="flex h-full flex-col items-center bg-black px-4 pt-5">
-          <div className="mb-2 flex w-full items-center gap-2">
+        <div className="flex h-full flex-col items-center bg-black px-2 pt-2">
+          <div className="mb-1.5 flex w-full items-center gap-1">
             <div
-              className="h-6 w-6 shrink-0 rounded-full"
+              className="h-4 w-4 shrink-0 rounded-full"
               style={{ backgroundColor: profile.avatarColor }}
             />
             <div className="min-w-0">
-              <div className="truncate text-[11px] font-bold text-white">{profile.name}</div>
-              <div className="truncate text-[10px] text-gray-500">{profile.handle}</div>
+              <div className="truncate text-[8px] font-bold text-white">{profile.name}</div>
+              <div className="truncate text-[7px] text-gray-500">{profile.handle}</div>
             </div>
           </div>
           <div className={`aspect-[9/13] w-full rounded-lg ${CONTENT_GRADIENT}`} />
-          <p className="mt-2 line-clamp-3 w-full text-[10px] leading-snug text-gray-300">
+          <p className="mt-1 line-clamp-2 w-full text-[7px] leading-snug text-gray-300">
             {caption}
           </p>
         </div>
@@ -53,7 +53,7 @@ export function VideoFrame({
       {template === "shop-content" && (
         <>
           <div className={`absolute inset-0 ${CONTENT_GRADIENT}`} />
-          <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-3 py-1 text-xs font-bold text-white">
+          <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2 py-0.5 text-[9px] font-bold text-white">
             {caption}
           </p>
         </>

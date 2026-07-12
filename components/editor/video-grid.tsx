@@ -21,7 +21,7 @@ export function VideoGrid({
   }
 
   return (
-    <div className="grid grid-cols-3 gap-4">
+    <div className="grid grid-cols-[repeat(auto-fill,minmax(85px,1fr))] gap-2">
       {videos.map((video) => {
         const batch = batches.find((b) => b.id === video.batchId);
         const profile = profiles.find((p) => p.id === batch?.profileId);
