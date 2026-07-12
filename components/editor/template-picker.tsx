@@ -1,4 +1,5 @@
 import { VideoFrame } from "./video-frame";
+import { resolveWatermarkDefaults } from "@/lib/editor/settings";
 import type { EditorTemplate, Profile } from "@/lib/editor/types";
 
 const TEMPLATES: { id: EditorTemplate; label: string; description: string }[] = [
@@ -48,6 +49,8 @@ export function TemplatePicker({
               template={template.id}
               profile={previewProfile}
               caption="Legenda de exemplo"
+              watermark={resolveWatermarkDefaults(previewProfile)}
+              reactionMedia={previewProfile.reactionMedia[0] ?? null}
             />
           </div>
           <p className="mt-2 text-xs font-semibold text-white">{template.label}</p>

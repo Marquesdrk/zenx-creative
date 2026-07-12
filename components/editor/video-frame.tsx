@@ -1,4 +1,5 @@
-import type { EditorTemplate, Profile } from "@/lib/editor/types";
+import { BadgeCheck } from "lucide-react";
+import type { EditorTemplate, Profile, ReactionMedia, WatermarkPosition } from "@/lib/editor/types";
 
 const CONTENT_GRADIENT = "bg-gradient-to-br from-neutral-700 to-neutral-900";
 
@@ -6,11 +7,17 @@ export function VideoFrame({
   template,
   profile,
   caption,
+  reactionMedia = null,
+  watermark = null,
 }: {
   template: EditorTemplate;
   profile: Profile;
   caption: string;
+  reactionMedia?: ReactionMedia | null;
+  watermark?: WatermarkPosition | null;
 }) {
+  const reactionColor = reactionMedia?.color ?? profile.avatarColor;
+
   return (
     <div
       data-testid="video-frame"
@@ -19,13 +26,15 @@ export function VideoFrame({
       {template === "react" && (
         <>
           <div
-            className="absolute inset-x-0 top-0 flex h-[36%] items-center justify-center border-b border-dashed border-white/20"
-            style={{ background: `linear-gradient(160deg, ${profile.avatarColor}33, #1a1a24)` }}
+            className="absolute inset-x-0 top-0 flex h-[36%] flex-col items-center justify-center gap-1 border-b border-dashed border-white/20"
+            style={{ background: `linear-gradient(160deg, ${reactionColor}33, #1a1a24)` }}
           >
-            <div
-              className="h-[22%] w-[22%] rounded-full"
-              style={{ backgroundColor: profile.avatarColor }}
-            />
+            <div className="h-[22%] w-[22%] rounded-full" style={{ backgroundColor: reactionColor }} />
+            {reactionMedia && (
+              <span className="px-1 text-center text-[7px] leading-tight text-white/70">
+                {reactionMedia.label}
+              </span>
+            )}
           </div>
           <div className={`absolute inset-x-0 bottom-0 top-[36%] ${CONTENT_GRADIENT}`} />
         </>
@@ -39,7 +48,12 @@ export function VideoFrame({
               style={{ backgroundColor: profile.avatarColor }}
             />
             <div className="min-w-0">
-              <div className="truncate text-[9px] font-bold text-white">{profile.name}</div>
+              <div className="flex items-center gap-0.5">
+                <span className="truncate text-[9px] font-bold text-white">{profile.name}</span>
+                {profile.verified && (
+                  <BadgeCheck size={9} className="shrink-0 text-accent" fill="currentColor" />
+                )}
+              </div>
               <div className="truncate text-[8px] text-gray-500">{profile.handle}</div>
             </div>
           </div>
@@ -57,6 +71,21 @@ export function VideoFrame({
             {caption}
           </p>
         </>
+      )}
+
+      {watermark && (
+        <div
+          data-testid="watermark-badge"
+          style={{
+            left: `${watermark.x}%`,
+            top: `${watermark.y}%`,
+            transform: `translate(-50%, -50%) scale(${watermark.scale})`,
+            opacity: watermark.opacity,
+          }}
+          className="absolute flex items-center justify-center rounded-md border border-white/30 bg-black/70 px-1.5 py-1 text-[9px] font-bold text-white"
+        >
+          {profile.watermarkLabel}
+        </div>
       )}
     </div>
   );

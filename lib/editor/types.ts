@@ -1,9 +1,24 @@
+export type ReactionMedia = {
+  id: string;
+  label: string;
+  color: string;
+};
+
+export type WatermarkPosition = { x: number; y: number; scale: number; opacity: number };
+
 export type Profile = {
   id: string;
   name: string;
   handle: string;
   avatarColor: string;
   watermarkLabel: string;
+  verified: boolean;
+  /** Tom editorial usado para reescrever legendas no template Twitter/X Style. */
+  editorialTone: string;
+  /** Padrão de marca d'água do perfil (nível 2). Ausente = usa o padrão global (nível 1). */
+  watermarkDefaults?: WatermarkPosition;
+  /** Mídias de reação salvas, usadas automaticamente pelo template React. */
+  reactionMedia: ReactionMedia[];
 };
 
 export type EditorTemplate = "react" | "twitter-style" | "shop-content";
@@ -23,8 +38,10 @@ export type EditorVideo = {
   filename: string;
   status: VideoStatus;
   caption: string;
-  watermarkPosition: { x: number; y: number; scale: number };
+  watermarkPosition: WatermarkPosition;
   cropBox: { x: number; y: number };
+  /** Mídia de reação atribuída automaticamente (template React); null nos demais templates. */
+  reactionMediaId: string | null;
 };
 
 export const TEMPLATE_LABELS: Record<EditorTemplate, string> = {

@@ -16,9 +16,10 @@ export function EditDrawer({
   profile: Profile;
   template: EditorTemplate;
   onClose: () => void;
-  onSave: (video: EditorVideo) => void;
+  onSave: (video: EditorVideo, applyToAll: boolean) => void;
 }) {
   const [draft, setDraft] = useState(video);
+  const [applyToAll, setApplyToAll] = useState(false);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -27,6 +28,9 @@ export function EditDrawer({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  const selectedReactionMedia =
+    profile.reactionMedia.find((r) => r.id === draft.reactionMediaId) ?? null;
 
   return (
     <div className="fixed inset-0 z-20 flex justify-end bg-black/60">
@@ -50,35 +54,84 @@ export function EditDrawer({
             template={template}
             profile={profile}
             video={draft}
+            reactionMedia={selectedReactionMedia}
             onWatermarkPositionChange={(watermarkPosition) =>
               setDraft((current) => ({ ...current, watermarkPosition }))
             }
           />
         </div>
 
-        <div>
-          <label htmlFor="watermark-scale" className="mb-1 block text-xs text-muted">
-            Tamanho da marca d&apos;água
-          </label>
-          <input
-            id="watermark-scale"
-            type="range"
-            min={0.5}
-            max={1.5}
-            step={0.1}
-            value={draft.watermarkPosition.scale}
-            onChange={(event) =>
-              setDraft((current) => ({
-                ...current,
-                watermarkPosition: {
-                  ...current.watermarkPosition,
-                  scale: Number(event.target.value),
-                },
-              }))
-            }
-            className="w-full accent-accent"
-          />
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="watermark-scale" className="mb-1 block text-xs text-muted">
+              Tamanho da marca
+            </label>
+            <input
+              id="watermark-scale"
+              type="range"
+              min={0.5}
+              max={1.5}
+              step={0.1}
+              value={draft.watermarkPosition.scale}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  watermarkPosition: {
+                    ...current.watermarkPosition,
+                    scale: Number(event.target.value),
+                  },
+                }))
+              }
+              className="w-full accent-accent"
+            />
+          </div>
+          <div>
+            <label htmlFor="watermark-opacity" className="mb-1 block text-xs text-muted">
+              Opacidade da marca
+            </label>
+            <input
+              id="watermark-opacity"
+              type="range"
+              min={0.2}
+              max={1}
+              step={0.05}
+              value={draft.watermarkPosition.opacity}
+              onChange={(event) =>
+                setDraft((current) => ({
+                  ...current,
+                  watermarkPosition: {
+                    ...current.watermarkPosition,
+                    opacity: Number(event.target.value),
+                  },
+                }))
+              }
+              className="w-full accent-accent"
+            />
+          </div>
         </div>
+
+        {template === "react" && profile.reactionMedia.length > 0 && (
+          <div>
+            <p className="mb-1.5 text-xs text-muted">Mídia de reação</p>
+            <div className="flex flex-wrap gap-1.5">
+              {profile.reactionMedia.map((media) => (
+                <button
+                  key={media.id}
+                  type="button"
+                  aria-pressed={draft.reactionMediaId === media.id}
+                  onClick={() => setDraft((current) => ({ ...current, reactionMediaId: media.id }))}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] ${
+                    draft.reactionMediaId === media.id
+                      ? "border-accent bg-card-hover text-white"
+                      : "border-border bg-card text-gray-300"
+                  }`}
+                >
+                  {media.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         <div>
           <label htmlFor="caption" className="mb-1 block text-xs text-muted">
@@ -134,6 +187,16 @@ export function EditDrawer({
           </div>
         </div>
 
+        <label className="flex items-center gap-2 text-xs text-gray-300">
+          <input
+            type="checkbox"
+            checked={applyToAll}
+            onChange={(event) => setApplyToAll(event.target.checked)}
+            className="accent-accent"
+          />
+          Aplicar a todos os vídeos deste lote
+        </label>
+
         <div className="mt-auto flex gap-3">
           <button
             type="button"
@@ -144,7 +207,7 @@ export function EditDrawer({
           </button>
           <button
             type="button"
-            onClick={() => onSave(draft)}
+            onClick={() => onSave(draft, applyToAll)}
             className="flex-1 rounded-lg bg-accent py-2 text-sm font-semibold text-background"
           >
             Salvar

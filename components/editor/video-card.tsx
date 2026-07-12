@@ -24,7 +24,15 @@ export function VideoCard({
     <div data-testid="video-card" data-status={video.status} className="flex flex-col gap-2">
       <div className="relative">
         {video.status === "ready" ? (
-          <VideoFrame template={template} profile={profile} caption={video.caption} />
+          <VideoFrame
+            template={template}
+            profile={profile}
+            caption={video.caption}
+            watermark={video.watermarkPosition}
+            reactionMedia={
+              profile.reactionMedia.find((r) => r.id === video.reactionMediaId) ?? null
+            }
+          />
         ) : (
           <div className="flex aspect-[9/16] w-full flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card">
             {video.status !== "error" && (

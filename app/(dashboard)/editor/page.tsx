@@ -6,10 +6,14 @@ import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
 import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
 import { scheduleVideoProcessing } from "@/lib/editor/mock-processing";
-import type { Batch, EditorTemplate, EditorVideo } from "@/lib/editor/types";
+import { resolveWatermarkDefaults } from "@/lib/editor/settings";
+import type { Batch, EditorTemplate, EditorVideo, Profile } from "@/lib/editor/types";
 
-function generateCaption(filename: string, template: EditorTemplate) {
+function generateCaption(filename: string, template: EditorTemplate, profile: Profile) {
   if (template === "shop-content") return "Link na bio";
+  if (template === "twitter-style") {
+    return `${profile.editorialTone} — legenda original de ${filename}, transcrita e reescrita mantendo o mesmo assunto.`;
+  }
   return `Legenda gerada automaticamente a partir de ${filename}`;
 }
 
@@ -40,6 +44,9 @@ export default function EditorPage() {
       setSentToDriveCount((count) => count + readyFromPreviousBatches);
     }
 
+    const profile = MOCK_PROFILES.find((p) => p.id === params.profileId);
+    if (!profile) return;
+
     const batch: Batch = {
       id: crypto.randomUUID(),
       profileId: params.profileId,
@@ -47,14 +54,22 @@ export default function EditorPage() {
       createdAt: new Date().toISOString(),
     };
 
-    const newVideos: EditorVideo[] = params.filenames.map((filename) => ({
+    // Nível 2 (padrão do perfil) substitui o nível 1 (padrão global) quando definido.
+    const watermarkDefaults = resolveWatermarkDefaults(profile);
+
+    const newVideos: EditorVideo[] = params.filenames.map((filename, index) => ({
       id: crypto.randomUUID(),
       batchId: batch.id,
       filename,
       status: "importing",
-      caption: generateCaption(filename, params.template),
-      watermarkPosition: { x: 85, y: 90, scale: 1 },
+      caption: generateCaption(filename, params.template, profile),
+      watermarkPosition: { ...watermarkDefaults },
       cropBox: { x: 50, y: 50 },
+      // Template React carrega automaticamente as mídias de reação salvas do perfil.
+      reactionMediaId:
+        params.template === "react" && profile.reactionMedia.length > 0
+          ? profile.reactionMedia[index % profile.reactionMedia.length].id
+          : null,
     }));
 
     setBatches((current) => [...current, batch]);
@@ -69,8 +84,22 @@ export default function EditorPage() {
     });
   }
 
-  function handleSaveEdit(updated: EditorVideo) {
-    setVideos((current) => current.map((v) => (v.id === updated.id ? updated : v)));
+  function handleSaveEdit(updated: EditorVideo, applyToAll: boolean) {
+    setVideos((current) =>
+      current.map((v) => {
+        if (v.id === updated.id) return updated;
+        if (applyToAll && v.batchId === updated.batchId) {
+          return {
+            ...v,
+            caption: updated.caption,
+            watermarkPosition: updated.watermarkPosition,
+            cropBox: updated.cropBox,
+            reactionMediaId: updated.reactionMediaId,
+          };
+        }
+        return v;
+      })
+    );
     setEditingVideoId(null);
   }
 
