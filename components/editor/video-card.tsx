@@ -28,12 +28,12 @@ export function VideoCard({
         ) : (
           <div className="flex aspect-[9/16] w-full flex-col items-center justify-center gap-2 rounded-xl border border-border bg-card">
             {video.status !== "error" && (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-white/20 border-t-accent" />
+              <div className="h-5 w-5 animate-spin rounded-full border-2 border-white/20 border-t-accent" />
             )}
           </div>
         )}
         <span
-          className={`absolute left-1 top-1 rounded-full px-1.5 py-0.5 text-[8px] font-bold ${
+          className={`absolute left-1.5 top-1.5 rounded-full px-2 py-0.5 text-[10px] font-bold ${
             video.status === "ready"
               ? "bg-[#4CD18A]/15 text-[#4CD18A]"
               : video.status === "error"
@@ -44,24 +44,24 @@ export function VideoCard({
           {STATUS_LABEL[video.status]}
         </span>
       </div>
-      <p className="truncate text-[9px] text-muted">{video.filename}</p>
+      <p className="truncate text-[11px] text-muted">{video.filename}</p>
       <div className="flex justify-center">
         {video.status === "ready" ? (
           <button
             type="button"
             aria-label={`Editar ${video.filename}`}
             onClick={onEdit}
-            className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-card text-gray-300 hover:bg-accent hover:text-background"
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-gray-300 hover:bg-accent hover:text-background"
           >
-            <Pencil size={11} />
+            <Pencil size={13} />
           </button>
         ) : video.status === "error" ? (
           <button
             type="button"
             aria-label={`Tentar novamente ${video.filename}`}
-            className="flex h-6 w-6 items-center justify-center rounded-full border border-border bg-card text-gray-300 hover:bg-accent hover:text-background"
+            className="flex h-7 w-7 items-center justify-center rounded-full border border-border bg-card text-gray-300 hover:bg-accent hover:text-background"
           >
-            <RotateCw size={11} />
+            <RotateCw size={13} />
           </button>
         ) : null}
       </div>

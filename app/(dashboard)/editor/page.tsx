@@ -16,6 +16,7 @@ function generateCaption(filename: string, template: EditorTemplate) {
 export default function EditorPage() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [videos, setVideos] = useState<EditorVideo[]>([]);
+  const [sentToDriveCount, setSentToDriveCount] = useState(0);
   const [isBatchModalOpen, setBatchModalOpen] = useState(false);
   const [editingVideoId, setEditingVideoId] = useState<string | null>(null);
   const cleanupsRef = useRef<Array<() => void>>([]);
@@ -32,6 +33,13 @@ export default function EditorPage() {
     template: EditorTemplate;
     filenames: string[];
   }) {
+    // Videos already marked "Pronto" from a previous batch are considered handed off
+    // to the (future) Google Drive output folder, so they leave the active grid here.
+    const readyFromPreviousBatches = videos.filter((v) => v.status === "ready").length;
+    if (readyFromPreviousBatches > 0) {
+      setSentToDriveCount((count) => count + readyFromPreviousBatches);
+    }
+
     const batch: Batch = {
       id: crypto.randomUUID(),
       profileId: params.profileId,
@@ -50,7 +58,7 @@ export default function EditorPage() {
     }));
 
     setBatches((current) => [...current, batch]);
-    setVideos((current) => [...newVideos, ...current]);
+    setVideos((current) => [...newVideos, ...current.filter((v) => v.status !== "ready")]);
     setBatchModalOpen(false);
 
     newVideos.forEach((video, index) => {
@@ -86,18 +94,22 @@ export default function EditorPage() {
           + Novo lote
         </button>
       </div>
-      <p className="mb-8 text-sm text-muted">
+      <p className="text-sm text-muted">
         Importe e edite vídeos em massa: marca d&apos;água, legendas e templates automáticos.
+      </p>
+      <p className="mb-8 mt-1 text-xs text-muted">
+        Vídeos prontos seguem para o Google Drive, pasta &quot;Vídeos para postar&quot; (a
+        configurar) assim que você iniciar o próximo lote.
       </p>
 
       <div className="mb-6 grid grid-cols-3 gap-4">
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="text-xl font-bold text-white">{readyCount}</div>
-          <div className="text-xs text-muted">vídeos prontos</div>
+          <div className="text-xs text-muted">prontos neste lote</div>
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
-          <div className="text-xl font-bold text-white">{videos.length}</div>
-          <div className="text-xs text-muted">no total</div>
+          <div className="text-xl font-bold text-white">{sentToDriveCount}</div>
+          <div className="text-xs text-muted">enviados ao Drive</div>
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="text-xl font-bold text-white">{batches.length}</div>
