@@ -55,6 +55,7 @@ export function WatermarkCanvas({
         template={template}
         profile={profile}
         caption={video.caption}
+        contentUrl={video.contentUrl}
         reactionMedia={reactionMedia}
         watermark={null}
       />

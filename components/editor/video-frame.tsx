@@ -3,16 +3,39 @@ import type { EditorTemplate, Profile, ReactionMedia, WatermarkPosition } from "
 
 const CONTENT_GRADIENT = "bg-gradient-to-br from-neutral-700 to-neutral-900";
 
+function ContentPreview({
+  contentUrl,
+  className,
+}: {
+  contentUrl: string | null;
+  className: string;
+}) {
+  if (contentUrl) {
+    return (
+      <video
+        src={contentUrl}
+        muted
+        playsInline
+        preload="metadata"
+        className={`${className} object-cover`}
+      />
+    );
+  }
+  return <div className={`${className} ${CONTENT_GRADIENT}`} />;
+}
+
 export function VideoFrame({
   template,
   profile,
   caption,
+  contentUrl = null,
   reactionMedia = null,
   watermark = null,
 }: {
   template: EditorTemplate;
   profile: Profile;
   caption: string;
+  contentUrl?: string | null;
   reactionMedia?: ReactionMedia | null;
   watermark?: WatermarkPosition | null;
 }) {
@@ -36,7 +59,10 @@ export function VideoFrame({
               </span>
             )}
           </div>
-          <div className={`absolute inset-x-0 bottom-0 top-[36%] ${CONTENT_GRADIENT}`} />
+          <ContentPreview
+            contentUrl={contentUrl}
+            className="absolute inset-x-0 bottom-0 top-[36%]"
+          />
         </>
       )}
 
@@ -57,7 +83,7 @@ export function VideoFrame({
               <div className="truncate text-[8px] text-gray-500">{profile.handle}</div>
             </div>
           </div>
-          <div className={`aspect-[9/13] w-full rounded-lg ${CONTENT_GRADIENT}`} />
+          <ContentPreview contentUrl={contentUrl} className="aspect-[9/13] w-full rounded-lg" />
           <p className="mt-1.5 line-clamp-2 w-full text-[8px] leading-snug text-gray-300">
             {caption}
           </p>
@@ -66,7 +92,7 @@ export function VideoFrame({
 
       {template === "shop-content" && (
         <>
-          <div className={`absolute inset-0 ${CONTENT_GRADIENT}`} />
+          <ContentPreview contentUrl={contentUrl} className="absolute inset-0" />
           <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-white">
             {caption}
           </p>

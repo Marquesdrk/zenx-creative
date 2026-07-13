@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BatchModal } from "@/components/editor/batch-modal";
+import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
 import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
@@ -35,13 +35,16 @@ export default function EditorPage() {
   function handleBatchSubmit(params: {
     profileId: string;
     template: EditorTemplate;
-    filenames: string[];
+    files: BatchSourceFile[];
   }) {
     // Videos already marked "Pronto" from a previous batch are considered handed off
     // to the (future) Google Drive output folder, so they leave the active grid here.
-    const readyFromPreviousBatches = videos.filter((v) => v.status === "ready").length;
-    if (readyFromPreviousBatches > 0) {
-      setSentToDriveCount((count) => count + readyFromPreviousBatches);
+    const readyFromPreviousBatches = videos.filter((v) => v.status === "ready");
+    if (readyFromPreviousBatches.length > 0) {
+      setSentToDriveCount((count) => count + readyFromPreviousBatches.length);
+      readyFromPreviousBatches.forEach((v) => {
+        if (v.contentUrl) URL.revokeObjectURL(v.contentUrl);
+      });
     }
 
     const profile = MOCK_PROFILES.find((p) => p.id === params.profileId);
@@ -57,7 +60,7 @@ export default function EditorPage() {
     // Nível 2 (padrão do perfil) substitui o nível 1 (padrão global) quando definido.
     const watermarkDefaults = resolveWatermarkDefaults(profile);
 
-    const newVideos: EditorVideo[] = params.filenames.map((filename, index) => ({
+    const newVideos: EditorVideo[] = params.files.map(({ name: filename, url }, index) => ({
       id: crypto.randomUUID(),
       batchId: batch.id,
       filename,
@@ -70,6 +73,7 @@ export default function EditorPage() {
         params.template === "react" && profile.reactionMedia.length > 0
           ? profile.reactionMedia[index % profile.reactionMedia.length].id
           : null,
+      contentUrl: url,
     }));
 
     setBatches((current) => [...current, batch]);

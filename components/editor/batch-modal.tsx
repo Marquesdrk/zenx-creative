@@ -9,6 +9,8 @@ import type { EditorTemplate, Profile } from "@/lib/editor/types";
 
 type Source = "upload" | "drive";
 
+export type BatchSourceFile = { name: string; url: string | null };
+
 export function BatchModal({
   profiles,
   onClose,
@@ -16,19 +18,23 @@ export function BatchModal({
 }: {
   profiles: Profile[];
   onClose: () => void;
-  onSubmit: (params: { profileId: string; template: EditorTemplate; filenames: string[] }) => void;
+  onSubmit: (params: {
+    profileId: string;
+    template: EditorTemplate;
+    files: BatchSourceFile[];
+  }) => void;
 }) {
   const [source, setSource] = useState<Source>("upload");
-  const [uploadedFiles, setUploadedFiles] = useState<string[]>([]);
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [driveConnected, setDriveConnected] = useState(false);
   const [selectedDriveFiles, setSelectedDriveFiles] = useState<string[]>([]);
   const [profileId, setProfileId] = useState<string | null>(null);
   const [template, setTemplate] = useState<EditorTemplate | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const filenames = source === "upload" ? uploadedFiles : selectedDriveFiles;
+  const fileCount = source === "upload" ? uploadedFiles.length : selectedDriveFiles.length;
   const previewProfile = profiles.find((p) => p.id === profileId) ?? profiles[0];
-  const canSubmit = filenames.length > 0 && profileId !== null && template !== null;
+  const canSubmit = fileCount > 0 && profileId !== null && template !== null;
 
   function toggleDriveFile(name: string) {
     setSelectedDriveFiles((current) =>
@@ -38,7 +44,11 @@ export function BatchModal({
 
   function handleSubmit() {
     if (!canSubmit || !profileId || !template) return;
-    onSubmit({ profileId, template, filenames });
+    const files: BatchSourceFile[] =
+      source === "upload"
+        ? uploadedFiles.map((file) => ({ name: file.name, url: URL.createObjectURL(file) }))
+        : selectedDriveFiles.map((name) => ({ name, url: null }));
+    onSubmit({ profileId, template, files });
   }
 
   return (
@@ -88,8 +98,7 @@ export function BatchModal({
                 accept="video/*"
                 className="hidden"
                 onChange={(event) => {
-                  const names = Array.from(event.target.files ?? []).map((f) => f.name);
-                  setUploadedFiles(names);
+                  setUploadedFiles(Array.from(event.target.files ?? []));
                 }}
               />
               <button

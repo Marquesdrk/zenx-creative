@@ -28,6 +28,7 @@ export function VideoCard({
             template={template}
             profile={profile}
             caption={video.caption}
+            contentUrl={video.contentUrl}
             watermark={video.watermarkPosition}
             reactionMedia={
               profile.reactionMedia.find((r) => r.id === video.reactionMediaId) ?? null

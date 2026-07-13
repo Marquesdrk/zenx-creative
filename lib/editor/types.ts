@@ -42,6 +42,9 @@ export type EditorVideo = {
   cropBox: { x: number; y: number };
   /** Mídia de reação atribuída automaticamente (template React); null nos demais templates. */
   reactionMediaId: string | null;
+  /** Object URL do arquivo enviado, usado como prévia real do conteúdo importado. Null para
+   *  arquivos vindos do Google Drive mockado, que não têm conteúdo de verdade. */
+  contentUrl: string | null;
 };
 
 export const TEMPLATE_LABELS: Record<EditorTemplate, string> = {
