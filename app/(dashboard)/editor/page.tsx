@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
-import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
+import { useProfiles } from "@/lib/editor/profiles-store";
 import { scheduleVideoProcessing } from "@/lib/editor/mock-processing";
 import { resolveWatermarkDefaults } from "@/lib/editor/settings";
 import type { Batch, EditorTemplate, EditorVideo, Profile } from "@/lib/editor/types";
@@ -18,6 +18,7 @@ function generateCaption(filename: string, template: EditorTemplate, profile: Pr
 }
 
 export default function EditorPage() {
+  const [profiles] = useProfiles();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [videos, setVideos] = useState<EditorVideo[]>([]);
   const [sentToDriveCount, setSentToDriveCount] = useState(0);
@@ -47,7 +48,7 @@ export default function EditorPage() {
       });
     }
 
-    const profile = MOCK_PROFILES.find((p) => p.id === params.profileId);
+    const profile = profiles.find((p) => p.id === params.profileId);
     if (!profile) return;
 
     const batch: Batch = {
@@ -110,7 +111,7 @@ export default function EditorPage() {
   const editingVideo = videos.find((v) => v.id === editingVideoId) ?? null;
   const editingBatch = editingVideo ? batches.find((b) => b.id === editingVideo.batchId) : null;
   const editingProfile = editingBatch
-    ? MOCK_PROFILES.find((p) => p.id === editingBatch.profileId)
+    ? profiles.find((p) => p.id === editingBatch.profileId)
     : null;
 
   const readyCount = videos.filter((v) => v.status === "ready").length;
@@ -153,13 +154,13 @@ export default function EditorPage() {
       <VideoGrid
         videos={videos}
         batches={batches}
-        profiles={MOCK_PROFILES}
+        profiles={profiles}
         onEdit={(video) => setEditingVideoId(video.id)}
       />
 
       {isBatchModalOpen && (
         <BatchModal
-          profiles={MOCK_PROFILES}
+          profiles={profiles}
           onClose={() => setBatchModalOpen(false)}
           onSubmit={handleBatchSubmit}
         />

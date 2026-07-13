@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { CircleUserRound, Settings, LogOut } from "lucide-react";
 
 export function ProfileMenu() {
@@ -46,14 +47,15 @@ export function ProfileMenu() {
           role="menu"
           className="absolute bottom-full left-0 z-10 mb-2 w-full rounded-xl border border-border bg-[#141414] p-1 shadow-lg"
         >
-          <button
+          <Link
+            href="/configuracoes"
             role="menuitem"
-            type="button"
+            onClick={() => setOpen(false)}
             className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-gray-200 hover:bg-card-hover"
           >
             <Settings size={16} />
             Configurações
-          </button>
+          </Link>
           <button
             role="menuitem"
             type="button"
