@@ -1,24 +1,21 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { ImageOff } from "lucide-react";
 import { VideoFrame } from "./video-frame";
-import type { EditorTemplate, EditorVideo, Profile, ReactionMedia } from "@/lib/editor/types";
+import type { EditorVideo, ShopContentProfile } from "@/lib/editor/types";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
 export function WatermarkCanvas({
-  template,
   profile,
   video,
-  reactionMedia = null,
   onWatermarkPositionChange,
 }: {
-  template: EditorTemplate;
-  profile: Profile;
+  profile: ShopContentProfile;
   video: EditorVideo;
-  reactionMedia?: ReactionMedia | null;
   onWatermarkPositionChange: (position: EditorVideo["watermarkPosition"]) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -52,12 +49,10 @@ export function WatermarkCanvas({
   return (
     <div ref={containerRef} className="relative select-none">
       <VideoFrame
-        template={template}
         profile={profile}
         caption={video.caption}
         contentUrl={video.contentUrl}
-        reactionMedia={reactionMedia}
-        watermark={null}
+        watermarkPosition={null}
       />
       <div
         role="button"
@@ -72,9 +67,14 @@ export function WatermarkCanvas({
           transform: `translate(-50%, -50%) scale(${scale})`,
           opacity,
         }}
-        className="absolute flex h-9 w-9 cursor-grab items-center justify-center rounded-md border border-white/30 bg-black/70 text-[11px] font-bold text-white active:cursor-grabbing"
+        className="absolute flex h-10 w-10 cursor-grab items-center justify-center rounded-md border border-white/30 bg-black/70 active:cursor-grabbing"
       >
-        {profile.watermarkLabel}
+        {profile.watermarkImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- object URL, not an optimizable static asset
+          <img src={profile.watermarkImageUrl} alt="" className="max-h-full max-w-full object-contain" />
+        ) : (
+          <ImageOff size={14} className="text-white/60" />
+        )}
       </div>
     </div>
   );

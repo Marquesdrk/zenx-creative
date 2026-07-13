@@ -6,12 +6,12 @@ import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
 import { useProfiles } from "@/lib/editor/profiles-store";
 import { scheduleVideoProcessing } from "@/lib/editor/mock-processing";
-import { resolveWatermarkDefaults } from "@/lib/editor/settings";
-import type { Batch, EditorTemplate, EditorVideo, Profile } from "@/lib/editor/types";
+import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
+import type { Batch, EditorVideo, Profile } from "@/lib/editor/types";
 
-function generateCaption(filename: string, template: EditorTemplate, profile: Profile) {
-  if (template === "shop-content") return "Link na bio";
-  if (template === "twitter-style") {
+function generateCaption(filename: string, profile: Profile) {
+  if (profile.template === "shop-content") return "Link na bio";
+  if (profile.template === "twitter-style") {
     return `${profile.editorialTone} — legenda original de ${filename}, transcrita e reescrita mantendo o mesmo assunto.`;
   }
   return `Legenda gerada automaticamente a partir de ${filename}`;
@@ -33,11 +33,7 @@ export default function EditorPage() {
     };
   }, []);
 
-  function handleBatchSubmit(params: {
-    profileId: string;
-    template: EditorTemplate;
-    files: BatchSourceFile[];
-  }) {
+  function handleBatchSubmit(params: { profileId: string; files: BatchSourceFile[] }) {
     // Videos already marked "Pronto" from a previous batch are considered handed off
     // to the (future) Google Drive output folder, so they leave the active grid here.
     const readyFromPreviousBatches = videos.filter((v) => v.status === "ready");
@@ -54,24 +50,28 @@ export default function EditorPage() {
     const batch: Batch = {
       id: crypto.randomUUID(),
       profileId: params.profileId,
-      template: params.template,
+      template: profile.template,
       createdAt: new Date().toISOString(),
     };
 
     // Nível 2 (padrão do perfil) substitui o nível 1 (padrão global) quando definido.
-    const watermarkDefaults = resolveWatermarkDefaults(profile);
+    // Só é relevante para perfis Shop/Content; os demais templates não têm marca d'água.
+    const watermarkDefaults =
+      profile.template === "shop-content"
+        ? resolveWatermarkDefaults(profile)
+        : GLOBAL_WATERMARK_DEFAULTS;
 
     const newVideos: EditorVideo[] = params.files.map(({ name: filename, url }, index) => ({
       id: crypto.randomUUID(),
       batchId: batch.id,
       filename,
       status: "importing",
-      caption: generateCaption(filename, params.template, profile),
+      caption: generateCaption(filename, profile),
       watermarkPosition: { ...watermarkDefaults },
       cropBox: { x: 50, y: 50 },
       // Template React carrega automaticamente as mídias de reação salvas do perfil.
       reactionMediaId:
-        params.template === "react" && profile.reactionMedia.length > 0
+        profile.template === "react" && profile.reactionMedia.length > 0
           ? profile.reactionMedia[index % profile.reactionMedia.length].id
           : null,
       contentUrl: url,
@@ -171,7 +171,6 @@ export default function EditorPage() {
           key={editingVideo.id}
           video={editingVideo}
           profile={editingProfile}
-          template={editingBatch.template}
           onClose={() => setEditingVideoId(null)}
           onSave={handleSaveEdit}
         />

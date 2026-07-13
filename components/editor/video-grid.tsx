@@ -27,13 +27,7 @@ export function VideoGrid({
         const profile = profiles.find((p) => p.id === batch?.profileId);
         if (!batch || !profile) return null;
         return (
-          <VideoCard
-            key={video.id}
-            video={video}
-            profile={profile}
-            template={batch.template}
-            onEdit={() => onEdit(video)}
-          />
+          <VideoCard key={video.id} video={video} profile={profile} onEdit={() => onEdit(video)} />
         );
       })}
     </div>

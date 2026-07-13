@@ -2,19 +2,18 @@
 
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { VideoFrame } from "./video-frame";
 import { WatermarkCanvas } from "./watermark-canvas";
-import type { EditorTemplate, EditorVideo, Profile } from "@/lib/editor/types";
+import type { EditorVideo, Profile } from "@/lib/editor/types";
 
 export function EditDrawer({
   video,
   profile,
-  template,
   onClose,
   onSave,
 }: {
   video: EditorVideo;
   profile: Profile;
-  template: EditorTemplate;
   onClose: () => void;
   onSave: (video: EditorVideo, applyToAll: boolean) => void;
 }) {
@@ -28,9 +27,6 @@ export function EditDrawer({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
-
-  const selectedReactionMedia =
-    profile.reactionMedia.find((r) => r.id === draft.reactionMediaId) ?? null;
 
   return (
     <div className="fixed inset-0 z-20 flex justify-end bg-black/60">
@@ -50,67 +46,80 @@ export function EditDrawer({
         <p className="truncate text-xs text-muted">{draft.filename}</p>
 
         <div className="w-full max-w-[220px]">
-          <WatermarkCanvas
-            template={template}
-            profile={profile}
-            video={draft}
-            reactionMedia={selectedReactionMedia}
-            onWatermarkPositionChange={(watermarkPosition) =>
-              setDraft((current) => ({ ...current, watermarkPosition }))
-            }
-          />
+          {profile.template === "shop-content" ? (
+            <WatermarkCanvas
+              profile={profile}
+              video={draft}
+              onWatermarkPositionChange={(watermarkPosition) =>
+                setDraft((current) => ({ ...current, watermarkPosition }))
+              }
+            />
+          ) : (
+            <VideoFrame
+              profile={profile}
+              caption={draft.caption}
+              contentUrl={draft.contentUrl}
+              reactionMediaUrl={
+                profile.template === "react"
+                  ? (profile.reactionMedia.find((r) => r.id === draft.reactionMediaId)?.url ?? null)
+                  : null
+              }
+            />
+          )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label htmlFor="watermark-scale" className="mb-1 block text-xs text-muted">
-              Tamanho da marca
-            </label>
-            <input
-              id="watermark-scale"
-              type="range"
-              min={0.5}
-              max={1.5}
-              step={0.1}
-              value={draft.watermarkPosition.scale}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  watermarkPosition: {
-                    ...current.watermarkPosition,
-                    scale: Number(event.target.value),
-                  },
-                }))
-              }
-              className="w-full accent-accent"
-            />
+        {profile.template === "shop-content" && (
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="watermark-scale" className="mb-1 block text-xs text-muted">
+                Tamanho da marca
+              </label>
+              <input
+                id="watermark-scale"
+                type="range"
+                min={0.5}
+                max={1.5}
+                step={0.1}
+                value={draft.watermarkPosition.scale}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    watermarkPosition: {
+                      ...current.watermarkPosition,
+                      scale: Number(event.target.value),
+                    },
+                  }))
+                }
+                className="w-full accent-accent"
+              />
+            </div>
+            <div>
+              <label htmlFor="watermark-opacity" className="mb-1 block text-xs text-muted">
+                Opacidade da marca
+              </label>
+              <input
+                id="watermark-opacity"
+                type="range"
+                min={0.2}
+                max={1}
+                step={0.05}
+                value={draft.watermarkPosition.opacity}
+                onChange={(event) =>
+                  setDraft((current) => ({
+                    ...current,
+                    watermarkPosition: {
+                      ...current.watermarkPosition,
+                      opacity: Number(event.target.value),
+                    },
+                  }))
+                }
+                className="w-full accent-accent"
+              />
+            </div>
           </div>
-          <div>
-            <label htmlFor="watermark-opacity" className="mb-1 block text-xs text-muted">
-              Opacidade da marca
-            </label>
-            <input
-              id="watermark-opacity"
-              type="range"
-              min={0.2}
-              max={1}
-              step={0.05}
-              value={draft.watermarkPosition.opacity}
-              onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  watermarkPosition: {
-                    ...current.watermarkPosition,
-                    opacity: Number(event.target.value),
-                  },
-                }))
-              }
-              className="w-full accent-accent"
-            />
-          </div>
-        </div>
+        )}
 
-        {template === "react" && profile.reactionMedia.length > 0 && (
+        {profile.template === "react" && profile.reactionMedia.length > 0 && (
           <div>
             <p className="mb-1.5 text-xs text-muted">Mídia de reação</p>
             <div className="flex flex-wrap gap-1.5">
@@ -133,18 +142,22 @@ export function EditDrawer({
           </div>
         )}
 
-        <div>
-          <label htmlFor="caption" className="mb-1 block text-xs text-muted">
-            Legenda
-          </label>
-          <textarea
-            id="caption"
-            value={draft.caption}
-            onChange={(event) => setDraft((current) => ({ ...current, caption: event.target.value }))}
-            rows={3}
-            className="w-full rounded-lg border border-border bg-card p-2 text-sm text-white"
-          />
-        </div>
+        {profile.template !== "react" && (
+          <div>
+            <label htmlFor="caption" className="mb-1 block text-xs text-muted">
+              Legenda
+            </label>
+            <textarea
+              id="caption"
+              value={draft.caption}
+              onChange={(event) =>
+                setDraft((current) => ({ ...current, caption: event.target.value }))
+              }
+              rows={3}
+              className="w-full rounded-lg border border-border bg-card p-2 text-sm text-white"
+            />
+          </div>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <div>

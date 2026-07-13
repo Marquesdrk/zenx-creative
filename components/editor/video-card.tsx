@@ -1,6 +1,6 @@
 import { Pencil, RotateCw } from "lucide-react";
 import { VideoFrame } from "./video-frame";
-import type { EditorTemplate, EditorVideo, Profile } from "@/lib/editor/types";
+import type { EditorVideo, Profile } from "@/lib/editor/types";
 
 const STATUS_LABEL: Record<EditorVideo["status"], string> = {
   importing: "Importando",
@@ -12,12 +12,10 @@ const STATUS_LABEL: Record<EditorVideo["status"], string> = {
 export function VideoCard({
   video,
   profile,
-  template,
   onEdit,
 }: {
   video: EditorVideo;
   profile: Profile;
-  template: EditorTemplate;
   onEdit: () => void;
 }) {
   return (
@@ -25,13 +23,14 @@ export function VideoCard({
       <div className="relative">
         {video.status === "ready" ? (
           <VideoFrame
-            template={template}
             profile={profile}
             caption={video.caption}
             contentUrl={video.contentUrl}
-            watermark={video.watermarkPosition}
-            reactionMedia={
-              profile.reactionMedia.find((r) => r.id === video.reactionMediaId) ?? null
+            watermarkPosition={video.watermarkPosition}
+            reactionMediaUrl={
+              profile.template === "react"
+                ? (profile.reactionMedia.find((r) => r.id === video.reactionMediaId)?.url ?? null)
+                : null
             }
           />
         ) : (

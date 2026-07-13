@@ -2,9 +2,11 @@
 
 import { useSyncExternalStore } from "react";
 import { MOCK_PROFILES } from "./mock-profiles";
-import type { Profile } from "./types";
+import type { EditorTemplate, Profile } from "./types";
 
-const STORAGE_KEY = "zenx-editor-profiles";
+// v2: profiles are now scoped to a single template (react/twitter-style/shop-content),
+// which is incompatible with the v1 shape — bump the key so old stored data is ignored.
+const STORAGE_KEY = "zenx-editor-profiles-v2";
 const listeners = new Set<() => void>();
 
 let cachedRaw: string | null = null;
@@ -64,16 +66,28 @@ export function useProfiles(): [Profile[], (next: Profile[] | ((current: Profile
   return [profiles, setProfiles];
 }
 
-export function createBlankProfile(): Profile {
-  return {
-    id: crypto.randomUUID(),
-    name: "Novo perfil",
-    handle: "@novoperfil",
-    avatarColor: "#6C7BFF",
-    watermarkLabel: "NP",
-    verified: false,
-    editorialTone: "Tom neutro",
-    watermarkDefaults: undefined,
-    reactionMedia: [],
-  };
+export function createBlankProfile(template: EditorTemplate): Profile {
+  const id = crypto.randomUUID();
+  switch (template) {
+    case "react":
+      return { id, name: "Novo perfil React", template, reactionMedia: [] };
+    case "twitter-style":
+      return {
+        id,
+        name: "Novo perfil X Style",
+        template,
+        handle: "@novoperfil",
+        avatarUrl: null,
+        verified: false,
+        editorialTone: "Tom neutro",
+      };
+    case "shop-content":
+      return {
+        id,
+        name: "Novo perfil Shop/Content",
+        template,
+        watermarkImageUrl: null,
+        watermarkDefaults: undefined,
+      };
+  }
 }

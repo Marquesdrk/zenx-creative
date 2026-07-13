@@ -3,9 +3,9 @@
 import { useRef, useState } from "react";
 import { X } from "lucide-react";
 import { ProfilePicker } from "./profile-picker";
-import { TemplatePicker } from "./template-picker";
+import { VideoFrame } from "./video-frame";
 import { MOCK_DRIVE_FILES } from "@/lib/editor/mock-profiles";
-import type { EditorTemplate, Profile } from "@/lib/editor/types";
+import { TEMPLATE_LABELS, type Profile } from "@/lib/editor/types";
 
 type Source = "upload" | "drive";
 
@@ -18,23 +18,18 @@ export function BatchModal({
 }: {
   profiles: Profile[];
   onClose: () => void;
-  onSubmit: (params: {
-    profileId: string;
-    template: EditorTemplate;
-    files: BatchSourceFile[];
-  }) => void;
+  onSubmit: (params: { profileId: string; files: BatchSourceFile[] }) => void;
 }) {
   const [source, setSource] = useState<Source>("upload");
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
   const [driveConnected, setDriveConnected] = useState(false);
   const [selectedDriveFiles, setSelectedDriveFiles] = useState<string[]>([]);
   const [profileId, setProfileId] = useState<string | null>(null);
-  const [template, setTemplate] = useState<EditorTemplate | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const fileCount = source === "upload" ? uploadedFiles.length : selectedDriveFiles.length;
-  const previewProfile = profiles.find((p) => p.id === profileId) ?? profiles[0];
-  const canSubmit = fileCount > 0 && profileId !== null && template !== null;
+  const selectedProfile = profiles.find((p) => p.id === profileId) ?? null;
+  const canSubmit = fileCount > 0 && selectedProfile !== null;
 
   function toggleDriveFile(name: string) {
     setSelectedDriveFiles((current) =>
@@ -43,17 +38,17 @@ export function BatchModal({
   }
 
   function handleSubmit() {
-    if (!canSubmit || !profileId || !template) return;
+    if (!canSubmit || !selectedProfile) return;
     const files: BatchSourceFile[] =
       source === "upload"
         ? uploadedFiles.map((file) => ({ name: file.name, url: URL.createObjectURL(file) }))
         : selectedDriveFiles.map((name) => ({ name, url: null }));
-    onSubmit({ profileId, template, files });
+    onSubmit({ profileId: selectedProfile.id, files });
   }
 
   return (
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-6">
-      <div className="flex max-h-[85vh] w-[560px] flex-col gap-5 overflow-y-auto rounded-2xl border border-border bg-[#101010] p-6">
+      <div className="flex max-h-[85vh] w-[640px] flex-col gap-5 overflow-y-auto rounded-2xl border border-border bg-[#101010] p-6">
         <div className="flex items-center justify-between">
           <h2 className="text-base font-semibold text-white">Novo lote</h2>
           <button
@@ -150,14 +145,22 @@ export function BatchModal({
           )}
         </div>
 
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Perfil</p>
-          <ProfilePicker profiles={profiles} value={profileId} onChange={setProfileId} />
-        </div>
+        <div className="flex gap-5">
+          <div className="flex-1">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+              Perfil (define o template automaticamente)
+            </p>
+            <ProfilePicker profiles={profiles} value={profileId} onChange={setProfileId} />
+          </div>
 
-        <div>
-          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Template</p>
-          <TemplatePicker value={template} previewProfile={previewProfile} onChange={setTemplate} />
+          {selectedProfile && (
+            <div className="w-[140px] shrink-0">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                Prévia — {TEMPLATE_LABELS[selectedProfile.template]}
+              </p>
+              <VideoFrame profile={selectedProfile} caption="Legenda de exemplo" />
+            </div>
+          )}
         </div>
 
         <button
