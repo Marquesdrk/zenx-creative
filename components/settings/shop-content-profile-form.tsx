@@ -64,7 +64,7 @@ export function ShopContentProfileForm({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-white hover:bg-card-hover"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground hover:bg-card-hover"
           >
             Enviar imagem
           </button>
@@ -80,7 +80,7 @@ export function ShopContentProfileForm({
 
       <div className="border-t border-border pt-5">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-white">Posição padrão</h3>
+          <h3 className="text-sm font-semibold text-foreground">Posição padrão</h3>
           {!usingGlobalDefault && (
             <button
               type="button"

@@ -50,12 +50,12 @@ export function BatchModal({
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-6">
       <div className="flex max-h-[85vh] w-[640px] flex-col gap-5 overflow-y-auto rounded-2xl border border-border bg-[#101010] p-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-white">Novo lote</h2>
+          <h2 className="text-base font-semibold text-foreground">Novo lote</h2>
           <button
             type="button"
             aria-label="Fechar"
             onClick={onClose}
-            className="rounded-lg p-1 text-gray-400 hover:bg-card-hover hover:text-white"
+            className="rounded-lg p-1 text-gray-400 hover:bg-card-hover hover:text-foreground"
           >
             <X size={18} />
           </button>
@@ -99,7 +99,7 @@ export function BatchModal({
               <button
                 type="button"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full rounded-xl border border-dashed border-border py-6 text-sm text-muted hover:border-accent hover:text-white"
+                className="w-full rounded-xl border border-dashed border-border py-6 text-sm text-muted hover:border-accent hover:text-foreground"
               >
                 {uploadedFiles.length > 0
                   ? `${uploadedFiles.length} arquivo(s) selecionado(s)`
@@ -114,14 +114,14 @@ export function BatchModal({
                 <button
                   type="button"
                   onClick={() => setDriveConnected(true)}
-                  className="w-full rounded-xl border border-border bg-card py-2 text-sm text-white hover:bg-card-hover"
+                  className="w-full rounded-xl border border-border bg-card py-2 text-sm text-foreground hover:bg-card-hover"
                 >
                   Conectar Google Drive
                 </button>
               ) : (
                 <div>
                   <p className="mb-2 text-xs text-muted">
-                    Conectado: <span className="text-white">Meus Vídeos/Instagram</span>
+                    Conectado: <span className="text-foreground">Meus Vídeos/Instagram</span>
                   </p>
                   <div className="flex flex-col gap-1">
                     {MOCK_DRIVE_FILES.map((name) => (

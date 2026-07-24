@@ -38,7 +38,7 @@ export function ProfileMenu() {
       >
         <CircleUserRound size={28} className="text-accent" />
         <span className="flex flex-col">
-          <span className="text-sm font-medium text-white">Zenx Creative</span>
+          <span className="text-sm font-medium text-foreground">Zenx Creative</span>
           <span className="text-xs text-muted">Uso pessoal</span>
         </span>
       </button>

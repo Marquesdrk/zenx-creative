@@ -73,7 +73,7 @@ export function WatermarkCanvas({
           // eslint-disable-next-line @next/next/no-img-element -- object URL, not an optimizable static asset
           <img src={profile.watermarkImageUrl} alt="" className="max-h-full max-w-full object-contain" />
         ) : (
-          <ImageOff size={14} className="text-white/60" />
+          <ImageOff size={14} className="text-foreground/60" />
         )}
       </div>
     </div>

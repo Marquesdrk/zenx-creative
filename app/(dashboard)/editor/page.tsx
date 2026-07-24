@@ -119,7 +119,7 @@ export default function EditorPage() {
   return (
     <div>
       <div className="mb-1 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-white">Editor em massa</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Editor em massa</h1>
         <button
           type="button"
           onClick={() => setBatchModalOpen(true)}
@@ -138,15 +138,15 @@ export default function EditorPage() {
 
       <div className="mb-6 grid grid-cols-3 gap-4">
         <div className="rounded-xl border border-border bg-card p-4">
-          <div className="text-xl font-bold text-white">{readyCount}</div>
+          <div className="text-xl font-bold text-foreground">{readyCount}</div>
           <div className="text-xs text-muted">prontos neste lote</div>
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
-          <div className="text-xl font-bold text-white">{sentToDriveCount}</div>
+          <div className="text-xl font-bold text-foreground">{sentToDriveCount}</div>
           <div className="text-xs text-muted">enviados ao Drive</div>
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
-          <div className="text-xl font-bold text-white">{batches.length}</div>
+          <div className="text-xl font-bold text-foreground">{batches.length}</div>
           <div className="text-xs text-muted">lotes criados</div>
         </div>
       </div>

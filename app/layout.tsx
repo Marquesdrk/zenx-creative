@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
-import { GridBackground } from "@/components/background/grid-background";
 
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 
@@ -13,10 +12,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="pt-BR" className={inter.variable}>
-      <body className="bg-background font-sans text-white antialiased">
-        <GridBackground />
-        {children}
-      </body>
+      <body className="bg-background font-sans text-foreground antialiased">{children}</body>
     </html>
   );
 }

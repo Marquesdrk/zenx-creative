@@ -48,7 +48,7 @@ export function ProfilePicker({
               >
                 <ProfileAvatar profile={profile} />
                 <div className="min-w-0">
-                  <p className="truncate text-sm font-medium text-white">{profile.name}</p>
+                  <p className="truncate text-sm font-medium text-foreground">{profile.name}</p>
                   <p className="truncate text-xs text-muted">
                     {profile.template === "twitter-style" ? profile.handle : TEMPLATE_LABELS[profile.template]}
                   </p>

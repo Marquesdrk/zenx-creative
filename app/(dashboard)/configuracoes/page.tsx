@@ -34,7 +34,7 @@ export default function ConfiguracoesPage() {
   return (
     <div>
       <div className="mb-1 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-white">Configurações</h1>
+        <h1 className="text-2xl font-semibold text-foreground">Configurações</h1>
         <div className="flex gap-2">
           {TEMPLATE_ORDER.map((template) => (
             <button
@@ -78,7 +78,7 @@ export default function ConfiguracoesPage() {
                       <ProfileAvatar profile={profile} />
                       <div className="min-w-0">
                         <div className="flex items-center gap-1">
-                          <span className="truncate text-sm font-medium text-white">
+                          <span className="truncate text-sm font-medium text-foreground">
                             {profile.name}
                           </span>
                           {profile.template === "twitter-style" && profile.verified && (

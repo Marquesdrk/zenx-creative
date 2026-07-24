@@ -38,7 +38,7 @@ export function ReactProfileForm({
 
   return (
     <div>
-      <h3 className="mb-1 text-sm font-semibold text-white">Mídias de reação do influencer</h3>
+      <h3 className="mb-1 text-sm font-semibold text-foreground">Mídias de reação do influencer</h3>
       <p className="mb-3 text-xs text-muted">
         Enviadas uma vez aqui e reaproveitadas automaticamente em todo lote com este perfil, sem
         precisar reimportar. O template React não usa marca d&apos;água.
@@ -54,7 +54,7 @@ export function ReactProfileForm({
                 type="button"
                 aria-label={`Remover mídia ${media.label}`}
                 onClick={() => removeMedia(media.id)}
-                className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-500/70"
+                className="absolute right-1 top-1 flex h-6 w-6 items-center justify-center rounded-full bg-black/70 text-foreground hover:bg-red-500/70"
               >
                 <Trash2 size={11} />
               </button>
@@ -62,14 +62,14 @@ export function ReactProfileForm({
             <input
               value={media.label}
               onChange={(event) => updateMedia(media.id, { label: event.target.value })}
-              className="rounded-lg border border-border bg-background p-1.5 text-xs text-white"
+              className="rounded-lg border border-border bg-background p-1.5 text-xs text-foreground"
             />
           </div>
         ))}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex aspect-[9/16] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-xs text-muted hover:border-accent hover:text-white"
+          className="flex aspect-[9/16] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-xs text-muted hover:border-accent hover:text-foreground"
         >
           + Adicionar
         </button>

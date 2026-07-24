@@ -28,7 +28,7 @@ export function ProfileSettingsForm({
             id={`name-${profile.id}`}
             value={profile.name}
             onChange={(event) => onChange({ ...profile, name: event.target.value })}
-            className="w-full max-w-xs rounded-lg border border-border bg-background p-2 text-sm text-white"
+            className="w-full max-w-xs rounded-lg border border-border bg-background p-2 text-sm text-foreground"
           />
         </div>
         <button

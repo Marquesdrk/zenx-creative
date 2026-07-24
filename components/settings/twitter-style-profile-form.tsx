@@ -39,7 +39,7 @@ export function TwitterStyleProfileForm({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-white hover:bg-card-hover"
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground hover:bg-card-hover"
           >
             Enviar foto de perfil
           </button>
@@ -61,7 +61,7 @@ export function TwitterStyleProfileForm({
           id={`handle-${profile.id}`}
           value={profile.handle}
           onChange={(event) => onChange({ ...profile, handle: event.target.value })}
-          className="w-full rounded-lg border border-border bg-background p-2 text-sm text-white"
+          className="w-full rounded-lg border border-border bg-background p-2 text-sm text-foreground"
         />
       </div>
 
@@ -83,7 +83,7 @@ export function TwitterStyleProfileForm({
           id={`tone-${profile.id}`}
           value={profile.editorialTone}
           onChange={(event) => onChange({ ...profile, editorialTone: event.target.value })}
-          className="w-full rounded-lg border border-border bg-background p-2 text-sm text-white"
+          className="w-full rounded-lg border border-border bg-background p-2 text-sm text-foreground"
         />
       </div>
     </div>

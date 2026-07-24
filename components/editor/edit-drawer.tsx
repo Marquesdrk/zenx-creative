@@ -32,12 +32,12 @@ export function EditDrawer({
     <div className="fixed inset-0 z-20 flex justify-end bg-black/60">
       <div className="flex h-full w-[380px] flex-col gap-5 overflow-y-auto border-l border-border bg-[#101010] p-6">
         <div className="flex items-center justify-between">
-          <h2 className="text-base font-semibold text-white">Editar vídeo</h2>
+          <h2 className="text-base font-semibold text-foreground">Editar vídeo</h2>
           <button
             type="button"
             aria-label="Fechar"
             onClick={onClose}
-            className="rounded-lg p-1 text-gray-400 hover:bg-card-hover hover:text-white"
+            className="rounded-lg p-1 text-gray-400 hover:bg-card-hover hover:text-foreground"
           >
             <X size={18} />
           </button>
@@ -131,7 +131,7 @@ export function EditDrawer({
                   onClick={() => setDraft((current) => ({ ...current, reactionMediaId: media.id }))}
                   className={`rounded-full border px-2.5 py-1 text-[11px] ${
                     draft.reactionMediaId === media.id
-                      ? "border-accent bg-card-hover text-white"
+                      ? "border-accent bg-card-hover text-foreground"
                       : "border-border bg-card text-gray-300"
                   }`}
                 >
@@ -154,7 +154,7 @@ export function EditDrawer({
                 setDraft((current) => ({ ...current, caption: event.target.value }))
               }
               rows={3}
-              className="w-full rounded-lg border border-border bg-card p-2 text-sm text-white"
+              className="w-full rounded-lg border border-border bg-card p-2 text-sm text-foreground"
             />
           </div>
         )}

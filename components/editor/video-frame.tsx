@@ -60,7 +60,7 @@ export function VideoFrame({
             )}
             <div className="min-w-0">
               <div className="flex items-center gap-0.5">
-                <span className="truncate text-[9px] font-bold text-white">{profile.name}</span>
+                <span className="truncate text-[9px] font-bold text-foreground">{profile.name}</span>
                 {profile.verified && (
                   <BadgeCheck size={9} className="shrink-0 text-accent" fill="currentColor" />
                 )}
@@ -78,7 +78,7 @@ export function VideoFrame({
       {profile.template === "shop-content" && (
         <>
           <VideoThumbnail url={contentUrl} className="absolute inset-0" />
-          <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-white">
+          <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-foreground">
             {caption}
           </p>
           {watermarkPosition && profile.watermarkImageUrl && (
