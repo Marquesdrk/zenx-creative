@@ -43,7 +43,7 @@ export function ReactProfileForm({
         Enviadas uma vez aqui e reaproveitadas automaticamente em todo lote com este perfil, sem
         precisar reimportar. O template React não usa marca d&apos;água.
       </p>
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-5 gap-3">
         {profile.reactionMedia.map((media) => (
           <div key={media.id} className="flex flex-col gap-1.5">
             <div className="relative aspect-[9/16] overflow-hidden rounded-lg border border-border bg-black">
