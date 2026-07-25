@@ -1,7 +1,7 @@
 import { ProfileAvatar } from "./profile-avatar";
-import { TEMPLATE_LABELS, type EditorTemplate, type Profile } from "@/lib/editor/types";
+import { ENGINE_LABELS, type Engine, type Profile } from "@/lib/editor/types";
 
-const TEMPLATE_ORDER: EditorTemplate[] = ["react", "twitter-style", "shop-content"];
+const ENGINE_ORDER: Engine[] = ["REACT", "X_STYLE", "UGC"];
 
 export function ProfilePicker({
   profiles,
@@ -12,9 +12,9 @@ export function ProfilePicker({
   value: string | null;
   onChange: (profileId: string) => void;
 }) {
-  const groups = TEMPLATE_ORDER.map((template) => ({
-    template,
-    profiles: profiles.filter((p) => p.template === template),
+  const groups = ENGINE_ORDER.map((engine) => ({
+    engine,
+    profiles: profiles.filter((p) => p.engine === engine),
   })).filter((group) => group.profiles.length > 0);
 
   if (groups.length === 0) {
@@ -28,9 +28,9 @@ export function ProfilePicker({
   return (
     <div className="flex flex-col gap-4">
       {groups.map((group) => (
-        <div key={group.template}>
+        <div key={group.engine}>
           <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
-            {TEMPLATE_LABELS[group.template]}
+            {ENGINE_LABELS[group.engine]}
           </p>
           <div className="flex flex-col gap-2">
             {group.profiles.map((profile) => (
@@ -50,7 +50,7 @@ export function ProfilePicker({
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">{profile.name}</p>
                   <p className="truncate text-xs text-muted">
-                    {profile.template === "twitter-style" ? profile.handle : TEMPLATE_LABELS[profile.template]}
+                    {profile.engine === "X_STYLE" ? profile.handle : ENGINE_LABELS[profile.engine]}
                   </p>
                 </div>
               </button>

@@ -5,7 +5,9 @@ const CONTENT_GRADIENT = "bg-gradient-to-br from-neutral-700 to-neutral-900";
 
 function VideoThumbnail({ url, className }: { url: string | null; className: string }) {
   if (url) {
-    return <video src={url} muted playsInline preload="metadata" className={`${className} object-cover`} />;
+    return (
+      <video src={url} muted playsInline preload="metadata" className={`${className} object-cover`} />
+    );
   }
   return <div className={`${className} ${CONTENT_GRADIENT}`} />;
 }
@@ -20,9 +22,9 @@ export function VideoFrame({
   profile: Profile;
   caption: string;
   contentUrl?: string | null;
-  /** Só relevante quando profile.template === "react". */
+  /** Só relevante quando profile.engine === "REACT". */
   reactionMediaUrl?: string | null;
-  /** Só relevante quando profile.template === "shop-content". */
+  /** Só relevante quando profile.engine === "UGC". Posição x/y é relativa (0 a 1). */
   watermarkPosition?: WatermarkPosition | null;
 }) {
   return (
@@ -30,20 +32,17 @@ export function VideoFrame({
       data-testid="video-frame"
       className="relative aspect-[9/16] w-full overflow-hidden rounded-xl border border-border bg-black"
     >
-      {profile.template === "react" && (
+      {profile.engine === "REACT" && (
         <>
           <VideoThumbnail
             url={reactionMediaUrl}
             className="absolute inset-x-0 top-0 h-[36%] border-b border-dashed border-white/20"
           />
-          <VideoThumbnail
-            url={contentUrl}
-            className="absolute inset-x-0 bottom-0 top-[36%]"
-          />
+          <VideoThumbnail url={contentUrl} className="absolute inset-x-0 bottom-0 top-[36%]" />
         </>
       )}
 
-      {profile.template === "twitter-style" && (
+      {profile.engine === "X_STYLE" && (
         <div className="flex h-full flex-col items-center bg-black px-2.5 pt-2.5">
           <div className="mb-2 flex w-full items-center gap-1.5">
             {profile.avatarUrl ? (
@@ -75,7 +74,7 @@ export function VideoFrame({
         </div>
       )}
 
-      {profile.template === "shop-content" && (
+      {profile.engine === "UGC" && (
         <>
           <VideoThumbnail url={contentUrl} className="absolute inset-0" />
           <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-foreground">
@@ -88,8 +87,8 @@ export function VideoFrame({
               alt=""
               data-testid="watermark-badge"
               style={{
-                left: `${watermarkPosition.x}%`,
-                top: `${watermarkPosition.y}%`,
+                left: `${watermarkPosition.x * 100}%`,
+                top: `${watermarkPosition.y * 100}%`,
                 transform: `translate(-50%, -50%) scale(${watermarkPosition.scale})`,
                 opacity: watermarkPosition.opacity,
               }}

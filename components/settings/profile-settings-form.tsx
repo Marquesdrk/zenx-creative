@@ -2,9 +2,9 @@
 
 import { Trash2 } from "lucide-react";
 import { ReactProfileForm } from "./react-profile-form";
-import { TwitterStyleProfileForm } from "./twitter-style-profile-form";
-import { ShopContentProfileForm } from "./shop-content-profile-form";
-import { TEMPLATE_LABELS, type Profile } from "@/lib/editor/types";
+import { XStyleProfileForm } from "./x-style-profile-form";
+import { UgcProfileForm } from "./ugc-profile-form";
+import { ENGINE_LABELS, type Profile } from "@/lib/editor/types";
 
 export function ProfileSettingsForm({
   profile,
@@ -22,7 +22,7 @@ export function ProfileSettingsForm({
       <div className="flex items-start justify-between gap-4">
         <div className="flex-1">
           <label htmlFor={`name-${profile.id}`} className="mb-1 block text-xs text-muted">
-            Nome de exibição · <span className="text-accent">{TEMPLATE_LABELS[profile.template]}</span>
+            Nome de exibição · <span className="text-accent">{ENGINE_LABELS[profile.engine]}</span>
           </label>
           <input
             id={`name-${profile.id}`}
@@ -43,15 +43,11 @@ export function ProfileSettingsForm({
       </div>
 
       <div className="border-t border-border pt-5">
-        {profile.template === "react" && (
-          <ReactProfileForm profile={profile} onChange={onChange} />
+        {profile.engine === "REACT" && <ReactProfileForm profile={profile} onChange={onChange} />}
+        {profile.engine === "X_STYLE" && (
+          <XStyleProfileForm profile={profile} onChange={onChange} />
         )}
-        {profile.template === "twitter-style" && (
-          <TwitterStyleProfileForm profile={profile} onChange={onChange} />
-        )}
-        {profile.template === "shop-content" && (
-          <ShopContentProfileForm profile={profile} onChange={onChange} />
-        )}
+        {profile.engine === "UGC" && <UgcProfileForm profile={profile} onChange={onChange} />}
       </div>
     </div>
   );

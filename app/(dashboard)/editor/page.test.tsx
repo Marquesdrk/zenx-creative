@@ -9,7 +9,7 @@ describe("EditorPage", () => {
     expect(screen.getByRole("heading", { name: "Editor em massa" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Importe e edite vídeos em massa: marca d'água, legendas e templates automáticos."
+        "Importe vídeos em massa: o perfil escolhido já define engine, template, marca d'água e legenda automaticamente."
       )
     ).toBeInTheDocument();
     expect(screen.getByText(/Nenhum vídeo importado ainda/)).toBeInTheDocument();

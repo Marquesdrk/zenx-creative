@@ -8,7 +8,7 @@ export function ProfileAvatar({
   profile: Profile;
   className?: string;
 }) {
-  if (profile.template === "react") {
+  if (profile.engine === "REACT") {
     const url = profile.reactionMedia[0]?.url ?? null;
     if (url) {
       return (
@@ -29,7 +29,7 @@ export function ProfileAvatar({
     );
   }
 
-  if (profile.template === "twitter-style") {
+  if (profile.engine === "X_STYLE") {
     if (profile.avatarUrl) {
       return (
         // eslint-disable-next-line @next/next/no-img-element -- object URL, not an optimizable static asset

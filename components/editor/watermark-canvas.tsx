@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { ImageOff } from "lucide-react";
 import { VideoFrame } from "./video-frame";
-import type { EditorVideo, ShopContentProfile } from "@/lib/editor/types";
+import type { UgcProfile, WatermarkPosition } from "@/lib/editor/types";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -11,12 +11,17 @@ function clamp(value: number, min: number, max: number) {
 
 export function WatermarkCanvas({
   profile,
-  video,
+  caption,
+  contentUrl = null,
+  watermarkPosition,
   onWatermarkPositionChange,
 }: {
-  profile: ShopContentProfile;
-  video: EditorVideo;
-  onWatermarkPositionChange: (position: EditorVideo["watermarkPosition"]) => void;
+  profile: UgcProfile;
+  caption: string;
+  contentUrl?: string | null;
+  /** Posição relativa (0 a 1). */
+  watermarkPosition: WatermarkPosition;
+  onWatermarkPositionChange: (position: WatermarkPosition) => void;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -24,9 +29,9 @@ export function WatermarkCanvas({
   function updateFromPointer(clientX: number, clientY: number) {
     const rect = containerRef.current?.getBoundingClientRect();
     if (!rect) return;
-    const x = clamp(((clientX - rect.left) / rect.width) * 100, 0, 100);
-    const y = clamp(((clientY - rect.top) / rect.height) * 100, 0, 100);
-    onWatermarkPositionChange({ ...video.watermarkPosition, x, y });
+    const x = clamp((clientX - rect.left) / rect.width, 0, 1);
+    const y = clamp((clientY - rect.top) / rect.height, 0, 1);
+    onWatermarkPositionChange({ ...watermarkPosition, x, y });
   }
 
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
@@ -44,16 +49,11 @@ export function WatermarkCanvas({
     setDragging(false);
   }
 
-  const { x, y, scale, opacity } = video.watermarkPosition;
+  const { x, y, scale, opacity } = watermarkPosition;
 
   return (
     <div ref={containerRef} className="relative select-none">
-      <VideoFrame
-        profile={profile}
-        caption={video.caption}
-        contentUrl={video.contentUrl}
-        watermarkPosition={null}
-      />
+      <VideoFrame profile={profile} caption={caption} contentUrl={contentUrl} watermarkPosition={null} />
       <div
         role="button"
         aria-label="Arrastar marca d'água"
@@ -62,8 +62,8 @@ export function WatermarkCanvas({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         style={{
-          left: `${x}%`,
-          top: `${y}%`,
+          left: `${x * 100}%`,
+          top: `${y * 100}%`,
           transform: `translate(-50%, -50%) scale(${scale})`,
           opacity,
         }}
@@ -71,9 +71,13 @@ export function WatermarkCanvas({
       >
         {profile.watermarkImageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element -- object URL, not an optimizable static asset
-          <img src={profile.watermarkImageUrl} alt="" className="max-h-full max-w-full object-contain" />
+          <img
+            src={profile.watermarkImageUrl}
+            alt=""
+            className="max-h-full max-w-full object-contain"
+          />
         ) : (
-          <ImageOff size={14} className="text-foreground/60" />
+          <ImageOff size={14} className="text-white/60" />
         )}
       </div>
     </div>

@@ -4,21 +4,22 @@ import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { VideoFrame } from "./video-frame";
 import { WatermarkCanvas } from "./watermark-canvas";
-import type { EditorVideo, Profile } from "@/lib/editor/types";
+import type { BatchItem, Profile } from "@/lib/editor/types";
 
 export function EditDrawer({
-  video,
+  item,
   profile,
   onClose,
   onSave,
 }: {
-  video: EditorVideo;
+  item: BatchItem;
   profile: Profile;
   onClose: () => void;
-  onSave: (video: EditorVideo, applyToAll: boolean) => void;
+  onSave: (item: BatchItem, applyToAll: boolean) => void;
 }) {
-  const [draft, setDraft] = useState(video);
+  const [draft, setDraft] = useState(item);
   const [applyToAll, setApplyToAll] = useState(false);
+  const overrides = draft.manualOverrides;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -27,6 +28,13 @@ export function EditDrawer({
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
+
+  function updateOverrides(patch: Partial<BatchItem["manualOverrides"]>) {
+    setDraft((current) => ({
+      ...current,
+      manualOverrides: { ...current.manualOverrides, ...patch },
+    }));
+  }
 
   return (
     <div className="fixed inset-0 z-20 flex justify-end bg-black/60">
@@ -46,29 +54,30 @@ export function EditDrawer({
         <p className="truncate text-xs text-muted">{draft.filename}</p>
 
         <div className="w-full max-w-[220px]">
-          {profile.template === "shop-content" ? (
+          {profile.engine === "UGC" ? (
             <WatermarkCanvas
               profile={profile}
-              video={draft}
-              onWatermarkPositionChange={(watermarkPosition) =>
-                setDraft((current) => ({ ...current, watermarkPosition }))
-              }
+              caption={overrides.caption}
+              contentUrl={draft.contentUrl}
+              watermarkPosition={overrides.watermarkPosition}
+              onWatermarkPositionChange={(watermarkPosition) => updateOverrides({ watermarkPosition })}
             />
           ) : (
             <VideoFrame
               profile={profile}
-              caption={draft.caption}
+              caption={overrides.caption}
               contentUrl={draft.contentUrl}
               reactionMediaUrl={
-                profile.template === "react"
-                  ? (profile.reactionMedia.find((r) => r.id === draft.reactionMediaId)?.url ?? null)
+                profile.engine === "REACT"
+                  ? (profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.url ??
+                    null)
                   : null
               }
             />
           )}
         </div>
 
-        {profile.template === "shop-content" && (
+        {profile.engine === "UGC" && (
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="watermark-scale" className="mb-1 block text-xs text-muted">
@@ -80,15 +89,14 @@ export function EditDrawer({
                 min={0.5}
                 max={1.5}
                 step={0.1}
-                value={draft.watermarkPosition.scale}
+                value={overrides.watermarkPosition.scale}
                 onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
+                  updateOverrides({
                     watermarkPosition: {
-                      ...current.watermarkPosition,
+                      ...overrides.watermarkPosition,
                       scale: Number(event.target.value),
                     },
-                  }))
+                  })
                 }
                 className="w-full accent-accent"
               />
@@ -103,15 +111,14 @@ export function EditDrawer({
                 min={0.2}
                 max={1}
                 step={0.05}
-                value={draft.watermarkPosition.opacity}
+                value={overrides.watermarkPosition.opacity}
                 onChange={(event) =>
-                  setDraft((current) => ({
-                    ...current,
+                  updateOverrides({
                     watermarkPosition: {
-                      ...current.watermarkPosition,
+                      ...overrides.watermarkPosition,
                       opacity: Number(event.target.value),
                     },
-                  }))
+                  })
                 }
                 className="w-full accent-accent"
               />
@@ -119,7 +126,7 @@ export function EditDrawer({
           </div>
         )}
 
-        {profile.template === "react" && profile.reactionMedia.length > 0 && (
+        {profile.engine === "REACT" && profile.reactionMedia.length > 0 && (
           <div>
             <p className="mb-1.5 text-xs text-muted">Mídia de reação</p>
             <div className="flex flex-wrap gap-1.5">
@@ -127,10 +134,10 @@ export function EditDrawer({
                 <button
                   key={media.id}
                   type="button"
-                  aria-pressed={draft.reactionMediaId === media.id}
-                  onClick={() => setDraft((current) => ({ ...current, reactionMediaId: media.id }))}
+                  aria-pressed={overrides.reactionMediaId === media.id}
+                  onClick={() => updateOverrides({ reactionMediaId: media.id })}
                   className={`rounded-full border px-2.5 py-1 text-[11px] ${
-                    draft.reactionMediaId === media.id
+                    overrides.reactionMediaId === media.id
                       ? "border-accent bg-card-hover text-foreground"
                       : "border-border bg-card text-gray-300"
                   }`}
@@ -142,17 +149,15 @@ export function EditDrawer({
           </div>
         )}
 
-        {profile.template !== "react" && (
+        {profile.engine !== "REACT" && (
           <div>
             <label htmlFor="caption" className="mb-1 block text-xs text-muted">
               Legenda
             </label>
             <textarea
               id="caption"
-              value={draft.caption}
-              onChange={(event) =>
-                setDraft((current) => ({ ...current, caption: event.target.value }))
-              }
+              value={overrides.caption}
+              onChange={(event) => updateOverrides({ caption: event.target.value })}
               rows={3}
               className="w-full rounded-lg border border-border bg-card p-2 text-sm text-foreground"
             />
@@ -169,12 +174,11 @@ export function EditDrawer({
               type="range"
               min={0}
               max={100}
-              value={draft.cropBox.x}
+              value={Math.round(overrides.cropBox.x * 100)}
               onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  cropBox: { ...current.cropBox, x: Number(event.target.value) },
-                }))
+                updateOverrides({
+                  cropBox: { ...overrides.cropBox, x: Number(event.target.value) / 100 },
+                })
               }
               className="w-full accent-accent"
             />
@@ -188,12 +192,11 @@ export function EditDrawer({
               type="range"
               min={0}
               max={100}
-              value={draft.cropBox.y}
+              value={Math.round(overrides.cropBox.y * 100)}
               onChange={(event) =>
-                setDraft((current) => ({
-                  ...current,
-                  cropBox: { ...current.cropBox, y: Number(event.target.value) },
-                }))
+                updateOverrides({
+                  cropBox: { ...overrides.cropBox, y: Number(event.target.value) / 100 },
+                })
               }
               className="w-full accent-accent"
             />

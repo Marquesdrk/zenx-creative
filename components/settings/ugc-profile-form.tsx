@@ -3,28 +3,14 @@
 import { useRef } from "react";
 import { WatermarkCanvas } from "@/components/editor/watermark-canvas";
 import { GLOBAL_WATERMARK_DEFAULTS } from "@/lib/editor/settings";
-import type { EditorVideo, ShopContentProfile, WatermarkPosition } from "@/lib/editor/types";
+import type { UgcProfile, WatermarkPosition } from "@/lib/editor/types";
 
-function previewVideo(profile: ShopContentProfile): EditorVideo {
-  return {
-    id: "preview",
-    batchId: "preview",
-    filename: "",
-    status: "ready",
-    caption: "Link na bio",
-    watermarkPosition: profile.watermarkDefaults ?? GLOBAL_WATERMARK_DEFAULTS,
-    cropBox: { x: 50, y: 50 },
-    reactionMediaId: null,
-    contentUrl: null,
-  };
-}
-
-export function ShopContentProfileForm({
+export function UgcProfileForm({
   profile,
   onChange,
 }: {
-  profile: ShopContentProfile;
-  onChange: (profile: ShopContentProfile) => void;
+  profile: UgcProfile;
+  onChange: (profile: UgcProfile) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const usingGlobalDefault = !profile.watermarkDefaults;
@@ -101,7 +87,9 @@ export function ShopContentProfileForm({
           <div className="w-[140px] shrink-0">
             <WatermarkCanvas
               profile={profile}
-              video={previewVideo(profile)}
+              caption="Link na bio"
+              contentUrl={null}
+              watermarkPosition={watermark}
               onWatermarkPositionChange={(position) =>
                 onChange({ ...profile, watermarkDefaults: position })
               }

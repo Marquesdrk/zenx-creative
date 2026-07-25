@@ -4,13 +4,13 @@ export const MOCK_PROFILES: Profile[] = [
   {
     id: "p1",
     name: "CarolReactGG",
-    template: "react",
+    engine: "REACT",
     reactionMedia: [],
   },
   {
     id: "p2",
     name: "Fatos Curiosos",
-    template: "twitter-style",
+    engine: "X_STYLE",
     handle: "@fatoscuriosos",
     avatarUrl: null,
     verified: true,
@@ -19,7 +19,7 @@ export const MOCK_PROFILES: Profile[] = [
   {
     id: "p3",
     name: "Clipes Diários",
-    template: "shop-content",
+    engine: "UGC",
     watermarkImageUrl: null,
     watermarkDefaults: undefined,
   },

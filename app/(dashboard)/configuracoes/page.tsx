@@ -5,9 +5,9 @@ import { BadgeCheck } from "lucide-react";
 import { ProfileAvatar } from "@/components/editor/profile-avatar";
 import { ProfileSettingsForm } from "@/components/settings/profile-settings-form";
 import { createBlankProfile, useProfiles } from "@/lib/editor/profiles-store";
-import { TEMPLATE_LABELS, type EditorTemplate } from "@/lib/editor/types";
+import { ENGINE_LABELS, type Engine } from "@/lib/editor/types";
 
-const TEMPLATE_ORDER: EditorTemplate[] = ["react", "twitter-style", "shop-content"];
+const ENGINE_ORDER: Engine[] = ["REACT", "X_STYLE", "UGC"];
 
 export default function ConfiguracoesPage() {
   const [profiles, setProfiles] = useProfiles();
@@ -15,8 +15,8 @@ export default function ConfiguracoesPage() {
 
   const selectedProfile = profiles.find((p) => p.id === selectedId) ?? profiles[0] ?? null;
 
-  function handleAddProfile(template: EditorTemplate) {
-    const profile = createBlankProfile(template);
+  function handleAddProfile(engine: Engine) {
+    const profile = createBlankProfile(engine);
     setProfiles((current) => [...current, profile]);
     setSelectedId(profile.id);
   }
@@ -36,32 +36,32 @@ export default function ConfiguracoesPage() {
       <div className="mb-1 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Configurações</h1>
         <div className="flex gap-2">
-          {TEMPLATE_ORDER.map((template) => (
+          {ENGINE_ORDER.map((engine) => (
             <button
-              key={template}
+              key={engine}
               type="button"
-              onClick={() => handleAddProfile(template)}
+              onClick={() => handleAddProfile(engine)}
               className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-background"
             >
-              + {TEMPLATE_LABELS[template]}
+              + {ENGINE_LABELS[engine]}
             </button>
           ))}
         </div>
       </div>
       <p className="mb-8 mt-1 text-sm text-muted">
-        Cada perfil pertence a um template só, com os campos daquele template. As mudanças aqui já
+        Cada perfil pertence a um engine só, com os campos daquele engine. As mudanças aqui já
         valem para o próximo lote criado.
       </p>
 
       <div className="flex gap-6">
         <div className="flex w-[240px] shrink-0 flex-col gap-4">
-          {TEMPLATE_ORDER.map((template) => {
-            const group = profiles.filter((p) => p.template === template);
+          {ENGINE_ORDER.map((engine) => {
+            const group = profiles.filter((p) => p.engine === engine);
             if (group.length === 0) return null;
             return (
-              <div key={template}>
+              <div key={engine}>
                 <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted">
-                  {TEMPLATE_LABELS[template]}
+                  {ENGINE_LABELS[engine]}
                 </p>
                 <div className="flex flex-col gap-2">
                   {group.map((profile) => (
@@ -81,11 +81,11 @@ export default function ConfiguracoesPage() {
                           <span className="truncate text-sm font-medium text-foreground">
                             {profile.name}
                           </span>
-                          {profile.template === "twitter-style" && profile.verified && (
+                          {profile.engine === "X_STYLE" && profile.verified && (
                             <BadgeCheck size={12} className="shrink-0 text-accent" fill="currentColor" />
                           )}
                         </div>
-                        {profile.template === "twitter-style" && (
+                        {profile.engine === "X_STYLE" && (
                           <p className="truncate text-xs text-muted">{profile.handle}</p>
                         )}
                       </div>

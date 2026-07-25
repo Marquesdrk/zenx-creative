@@ -5,7 +5,7 @@ import { X } from "lucide-react";
 import { ProfilePicker } from "./profile-picker";
 import { VideoFrame } from "./video-frame";
 import { MOCK_DRIVE_FILES } from "@/lib/editor/mock-profiles";
-import { TEMPLATE_LABELS, type Profile } from "@/lib/editor/types";
+import { ENGINE_LABELS, type Profile } from "@/lib/editor/types";
 
 type Source = "upload" | "drive";
 
@@ -148,7 +148,7 @@ export function BatchModal({
         <div className="flex gap-5">
           <div className="flex-1">
             <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-              Perfil (define o template automaticamente)
+              Perfil (define engine e template automaticamente)
             </p>
             <ProfilePicker profiles={profiles} value={profileId} onChange={setProfileId} />
           </div>
@@ -156,7 +156,7 @@ export function BatchModal({
           {selectedProfile && (
             <div className="w-[140px] shrink-0">
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-                Prévia — {TEMPLATE_LABELS[selectedProfile.template]}
+                Prévia — {ENGINE_LABELS[selectedProfile.engine]}
               </p>
               <VideoFrame profile={selectedProfile} caption="Legenda de exemplo" />
             </div>

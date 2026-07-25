@@ -2,11 +2,11 @@
 
 import { useSyncExternalStore } from "react";
 import { MOCK_PROFILES } from "./mock-profiles";
-import type { EditorTemplate, Profile } from "./types";
+import type { Engine, Profile } from "./types";
 
-// v2: profiles are now scoped to a single template (react/twitter-style/shop-content),
-// which is incompatible with the v1 shape — bump the key so old stored data is ignored.
-const STORAGE_KEY = "zenx-editor-profiles-v2";
+// v3: `template` renamed to `engine` (REACT/X_STYLE/UGC), incompatible with the v2 shape —
+// bump the key so old stored data is ignored.
+const STORAGE_KEY = "zenx-editor-profiles-v3";
 const listeners = new Set<() => void>();
 
 let cachedRaw: string | null = null;
@@ -66,26 +66,26 @@ export function useProfiles(): [Profile[], (next: Profile[] | ((current: Profile
   return [profiles, setProfiles];
 }
 
-export function createBlankProfile(template: EditorTemplate): Profile {
+export function createBlankProfile(engine: Engine): Profile {
   const id = crypto.randomUUID();
-  switch (template) {
-    case "react":
-      return { id, name: "Novo perfil React", template, reactionMedia: [] };
-    case "twitter-style":
+  switch (engine) {
+    case "REACT":
+      return { id, name: "Novo perfil React", engine, reactionMedia: [] };
+    case "X_STYLE":
       return {
         id,
         name: "Novo perfil X Style",
-        template,
+        engine,
         handle: "@novoperfil",
         avatarUrl: null,
         verified: false,
         editorialTone: "Tom neutro",
       };
-    case "shop-content":
+    case "UGC":
       return {
         id,
-        name: "Novo perfil Shop/Content",
-        template,
+        name: "Novo perfil UGC",
+        engine,
         watermarkImageUrl: null,
         watermarkDefaults: undefined,
       };

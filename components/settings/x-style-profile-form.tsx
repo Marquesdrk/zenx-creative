@@ -1,14 +1,14 @@
 "use client";
 
 import { useRef } from "react";
-import type { TwitterStyleProfile } from "@/lib/editor/types";
+import type { XStyleProfile } from "@/lib/editor/types";
 
-export function TwitterStyleProfileForm({
+export function XStyleProfileForm({
   profile,
   onChange,
 }: {
-  profile: TwitterStyleProfile;
-  onChange: (profile: TwitterStyleProfile) => void;
+  profile: XStyleProfile;
+  onChange: (profile: XStyleProfile) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
