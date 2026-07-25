@@ -5,18 +5,25 @@ import { BadgeCheck } from "lucide-react";
 import { ProfileAvatar } from "@/components/editor/profile-avatar";
 import { ProfileSettingsForm } from "@/components/settings/profile-settings-form";
 import { createBlankProfile, useProfiles } from "@/lib/editor/profiles-store";
-import { ENGINE_LABELS, type Engine } from "@/lib/editor/types";
+import { createDefaultTemplate, useTemplates } from "@/lib/editor/templates-store";
+import { ENGINE_LABELS, type Engine, type Template } from "@/lib/editor/types";
 
 const ENGINE_ORDER: Engine[] = ["REACT", "X_STYLE", "UGC"];
 
 export default function ConfiguracoesPage() {
   const [profiles, setProfiles] = useProfiles();
+  const [templates, setTemplates] = useTemplates();
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const selectedProfile = profiles.find((p) => p.id === selectedId) ?? profiles[0] ?? null;
+  const selectedTemplate = selectedProfile
+    ? (templates.find((t) => t.id === selectedProfile.templateId) ?? null)
+    : null;
 
   function handleAddProfile(engine: Engine) {
-    const profile = createBlankProfile(engine);
+    const template = createDefaultTemplate(engine, `Padrão — novo perfil`);
+    setTemplates((current) => [...current, template]);
+    const profile = createBlankProfile(engine, template.id);
     setProfiles((current) => [...current, profile]);
     setSelectedId(profile.id);
   }
@@ -25,9 +32,18 @@ export default function ConfiguracoesPage() {
     setProfiles((current) => current.map((p) => (p.id === updated.id ? updated : p)));
   }
 
+  function handleChangeTemplate(updated: Template) {
+    setTemplates((current) => current.map((t) => (t.id === updated.id ? updated : t)));
+  }
+
   function handleDeleteProfile(id: string) {
     if (profiles.length <= 1) return;
+    const toDelete = profiles.find((p) => p.id === id);
     setProfiles((current) => current.filter((p) => p.id !== id));
+    // 1:1 hoje — remove o template junto, a menos que outro perfil ainda o use.
+    if (toDelete && !profiles.some((p) => p.id !== id && p.templateId === toDelete.templateId)) {
+      setTemplates((current) => current.filter((t) => t.id !== toDelete.templateId));
+    }
     if (selectedId === id) setSelectedId(null);
   }
 
@@ -102,7 +118,9 @@ export default function ConfiguracoesPage() {
             <ProfileSettingsForm
               key={selectedProfile.id}
               profile={selectedProfile}
-              onChange={handleChangeProfile}
+              template={selectedTemplate}
+              onChangeProfile={handleChangeProfile}
+              onChangeTemplate={handleChangeTemplate}
               onDelete={() => handleDeleteProfile(selectedProfile.id)}
               canDelete={profiles.length > 1}
             />

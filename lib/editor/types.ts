@@ -16,6 +16,8 @@ export type ReactProfile = {
   id: string;
   name: string;
   engine: "REACT";
+  /** Template que define posições/comportamento visual deste perfil. */
+  templateId: string;
   /** Mídias de reação do influencer, enviadas uma vez e reaproveitadas em todo lote. */
   reactionMedia: ReactionMedia[];
 };
@@ -24,6 +26,7 @@ export type XStyleProfile = {
   id: string;
   name: string;
   engine: "X_STYLE";
+  templateId: string;
   handle: string;
   /** Object URL da foto de perfil enviada. Null enquanto não for enviada. */
   avatarUrl: string | null;
@@ -36,15 +39,29 @@ export type UgcProfile = {
   id: string;
   name: string;
   engine: "UGC";
+  templateId: string;
   /** Object URL da imagem de marca d'água personalizada enviada. Null = sem marca (opcional). */
   watermarkImageUrl: string | null;
-  /** Padrão de posição/tamanho/opacidade do perfil (nível 2). Ausente = padrão global (nível 1). */
+};
+
+/** Aponta para um template e armazena identidade, assets e configuração (Drive/conexões
+ *  sociais chegam nas fases 6–7). */
+export type Profile = ReactProfile | XStyleProfile | UgcProfile;
+
+/** Define posições, dimensões e comportamento visual — hoje só o essencial de cada engine já
+ *  suportado pela UI; mais campos (fontes, cores, áudio) entram conforme forem implementados. */
+export type ReactTemplate = { id: string; engine: "REACT"; name: string };
+export type XStyleTemplate = { id: string; engine: "X_STYLE"; name: string };
+export type UgcTemplate = {
+  id: string;
+  engine: "UGC";
+  name: string;
+  /** Padrão de posição/tamanho/opacidade da marca d'água (nível 2). Ausente = padrão global
+   *  (nível 1). */
   watermarkDefaults?: WatermarkPosition;
 };
 
-/** Aponta para um template (por enquanto embutido no próprio perfil — fase 2 separa isso) e
- *  armazena identidade, assets e configuração. Drive/conexões sociais chegam nas fases 6–7. */
-export type Profile = ReactProfile | XStyleProfile | UgcProfile;
+export type Template = ReactTemplate | XStyleTemplate | UgcTemplate;
 
 /** Estado do item do lote ao longo do pipeline. */
 export type BatchItemStatus =

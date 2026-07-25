@@ -5,6 +5,7 @@ import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-moda
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
 import { useProfiles } from "@/lib/editor/profiles-store";
+import { useTemplates } from "@/lib/editor/templates-store";
 import { scheduleImportAnalysis, scheduleRender } from "@/lib/editor/mock-processing";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
 import type { Batch, BatchItem, Profile } from "@/lib/editor/types";
@@ -19,6 +20,7 @@ function generateCaption(filename: string, profile: Profile) {
 
 export default function EditorPage() {
   const [profiles] = useProfiles();
+  const [templates] = useTemplates();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [items, setItems] = useState<BatchItem[]>([]);
   const [sentToDriveCount, setSentToDriveCount] = useState(0);
@@ -44,10 +46,13 @@ export default function EditorPage() {
       createdAt: new Date().toISOString(),
     };
 
-    // Nível 2 (padrão do perfil) substitui o nível 1 (padrão global) quando definido.
+    // Nível 2 (padrão do template) substitui o nível 1 (padrão global) quando definido.
     // Só é relevante para perfis UGC; os demais engines não têm marca d'água.
+    const template = templates.find((t) => t.id === profile.templateId);
     const watermarkDefaults =
-      profile.engine === "UGC" ? resolveWatermarkDefaults(profile) : GLOBAL_WATERMARK_DEFAULTS;
+      profile.engine === "UGC" && template?.engine === "UGC"
+        ? resolveWatermarkDefaults(template)
+        : GLOBAL_WATERMARK_DEFAULTS;
 
     const newItems: BatchItem[] = params.files.map(({ name: filename, url }, index) => ({
       id: crypto.randomUUID(),

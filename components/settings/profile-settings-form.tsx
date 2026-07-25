@@ -4,16 +4,20 @@ import { Trash2 } from "lucide-react";
 import { ReactProfileForm } from "./react-profile-form";
 import { XStyleProfileForm } from "./x-style-profile-form";
 import { UgcProfileForm } from "./ugc-profile-form";
-import { ENGINE_LABELS, type Profile } from "@/lib/editor/types";
+import { ENGINE_LABELS, type Profile, type Template } from "@/lib/editor/types";
 
 export function ProfileSettingsForm({
   profile,
-  onChange,
+  template,
+  onChangeProfile,
+  onChangeTemplate,
   onDelete,
   canDelete,
 }: {
   profile: Profile;
-  onChange: (profile: Profile) => void;
+  template: Template | null;
+  onChangeProfile: (profile: Profile) => void;
+  onChangeTemplate: (template: Template) => void;
   onDelete: () => void;
   canDelete: boolean;
 }) {
@@ -27,7 +31,7 @@ export function ProfileSettingsForm({
           <input
             id={`name-${profile.id}`}
             value={profile.name}
-            onChange={(event) => onChange({ ...profile, name: event.target.value })}
+            onChange={(event) => onChangeProfile({ ...profile, name: event.target.value })}
             className="w-full max-w-xs rounded-lg border border-border bg-background p-2 text-sm text-foreground"
           />
         </div>
@@ -43,11 +47,23 @@ export function ProfileSettingsForm({
       </div>
 
       <div className="border-t border-border pt-5">
-        {profile.engine === "REACT" && <ReactProfileForm profile={profile} onChange={onChange} />}
-        {profile.engine === "X_STYLE" && (
-          <XStyleProfileForm profile={profile} onChange={onChange} />
+        {profile.engine === "REACT" && (
+          <ReactProfileForm profile={profile} onChange={onChangeProfile} />
         )}
-        {profile.engine === "UGC" && <UgcProfileForm profile={profile} onChange={onChange} />}
+        {profile.engine === "X_STYLE" && (
+          <XStyleProfileForm profile={profile} onChange={onChangeProfile} />
+        )}
+        {profile.engine === "UGC" &&
+          (template && template.engine === "UGC" ? (
+            <UgcProfileForm
+              profile={profile}
+              template={template}
+              onChangeProfile={onChangeProfile}
+              onChangeTemplate={onChangeTemplate}
+            />
+          ) : (
+            <p className="text-xs text-muted">Template não encontrado para este perfil.</p>
+          ))}
       </div>
     </div>
   );

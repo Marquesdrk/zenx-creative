@@ -3,28 +3,32 @@
 import { useRef } from "react";
 import { WatermarkCanvas } from "@/components/editor/watermark-canvas";
 import { GLOBAL_WATERMARK_DEFAULTS } from "@/lib/editor/settings";
-import type { UgcProfile, WatermarkPosition } from "@/lib/editor/types";
+import type { UgcProfile, UgcTemplate, WatermarkPosition } from "@/lib/editor/types";
 
 export function UgcProfileForm({
   profile,
-  onChange,
+  template,
+  onChangeProfile,
+  onChangeTemplate,
 }: {
   profile: UgcProfile;
-  onChange: (profile: UgcProfile) => void;
+  template: UgcTemplate;
+  onChangeProfile: (profile: UgcProfile) => void;
+  onChangeTemplate: (template: UgcTemplate) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const usingGlobalDefault = !profile.watermarkDefaults;
-  const watermark = profile.watermarkDefaults ?? GLOBAL_WATERMARK_DEFAULTS;
+  const usingGlobalDefault = !template.watermarkDefaults;
+  const watermark = template.watermarkDefaults ?? GLOBAL_WATERMARK_DEFAULTS;
 
   function updateWatermark(patch: Partial<WatermarkPosition>) {
-    onChange({ ...profile, watermarkDefaults: { ...watermark, ...patch } });
+    onChangeTemplate({ ...template, watermarkDefaults: { ...watermark, ...patch } });
   }
 
   function handleImageSelected(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
     if (profile.watermarkImageUrl) URL.revokeObjectURL(profile.watermarkImageUrl);
-    onChange({ ...profile, watermarkImageUrl: URL.createObjectURL(file) });
+    onChangeProfile({ ...profile, watermarkImageUrl: URL.createObjectURL(file) });
   }
 
   return (
@@ -66,11 +70,11 @@ export function UgcProfileForm({
 
       <div className="border-t border-border pt-5">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-foreground">Posição padrão</h3>
+          <h3 className="text-sm font-semibold text-foreground">Posição padrão (template)</h3>
           {!usingGlobalDefault && (
             <button
               type="button"
-              onClick={() => onChange({ ...profile, watermarkDefaults: undefined })}
+              onClick={() => onChangeTemplate({ ...template, watermarkDefaults: undefined })}
               className="text-xs text-accent hover:underline"
             >
               Restaurar padrão global
@@ -79,7 +83,7 @@ export function UgcProfileForm({
         </div>
         {usingGlobalDefault && (
           <p className="mb-3 text-xs text-muted">
-            Este perfil ainda usa o padrão global. Arraste a marca abaixo para salvar um padrão
+            Este template ainda usa o padrão global. Arraste a marca abaixo para salvar um padrão
             próprio.
           </p>
         )}
@@ -91,7 +95,7 @@ export function UgcProfileForm({
               contentUrl={null}
               watermarkPosition={watermark}
               onWatermarkPositionChange={(position) =>
-                onChange({ ...profile, watermarkDefaults: position })
+                onChangeTemplate({ ...template, watermarkDefaults: position })
               }
             />
           </div>

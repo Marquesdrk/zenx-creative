@@ -1,6 +1,6 @@
-import type { UgcProfile, WatermarkPosition } from "./types";
+import type { UgcTemplate, WatermarkPosition } from "./types";
 
-/** Nível 1: padrão global, usado quando o perfil UGC não define o próprio padrão. */
+/** Nível 1: padrão global, usado quando o template UGC não define o próprio padrão. */
 export const GLOBAL_WATERMARK_DEFAULTS: WatermarkPosition = {
   x: 0.85,
   y: 0.9,
@@ -8,7 +8,7 @@ export const GLOBAL_WATERMARK_DEFAULTS: WatermarkPosition = {
   opacity: 1,
 };
 
-/** Nível 2: padrão do perfil substitui o padrão global. */
-export function resolveWatermarkDefaults(profile: UgcProfile): WatermarkPosition {
-  return profile.watermarkDefaults ?? GLOBAL_WATERMARK_DEFAULTS;
+/** Nível 2: padrão do template substitui o padrão global. */
+export function resolveWatermarkDefaults(template: UgcTemplate): WatermarkPosition {
+  return template.watermarkDefaults ?? GLOBAL_WATERMARK_DEFAULTS;
 }

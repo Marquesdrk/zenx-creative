@@ -5,12 +5,14 @@ export const MOCK_PROFILES: Profile[] = [
     id: "p1",
     name: "CarolReactGG",
     engine: "REACT",
+    templateId: "t1",
     reactionMedia: [],
   },
   {
     id: "p2",
     name: "Fatos Curiosos",
     engine: "X_STYLE",
+    templateId: "t2",
     handle: "@fatoscuriosos",
     avatarUrl: null,
     verified: true,
@@ -20,8 +22,8 @@ export const MOCK_PROFILES: Profile[] = [
     id: "p3",
     name: "Clipes Diários",
     engine: "UGC",
+    templateId: "t3",
     watermarkImageUrl: null,
-    watermarkDefaults: undefined,
   },
 ];
 
