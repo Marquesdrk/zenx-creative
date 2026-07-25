@@ -46,7 +46,7 @@ export function ReactProfileForm({
       <div className="grid grid-cols-5 gap-3">
         {profile.reactionMedia.map((media) => (
           <div key={media.id} className="flex flex-col gap-1.5">
-            <div className="relative aspect-[9/16] overflow-hidden rounded-lg border border-border bg-black">
+            <div className="relative aspect-[9/8] overflow-hidden rounded-lg border border-border bg-black">
               {media.url && (
                 <video src={media.url} muted playsInline className="h-full w-full object-cover" />
               )}
@@ -69,7 +69,7 @@ export function ReactProfileForm({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="flex aspect-[9/16] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-xs text-muted hover:border-accent hover:text-foreground"
+          className="flex aspect-[9/8] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-xs text-muted hover:border-accent hover:text-foreground"
         >
           + Adicionar
         </button>
