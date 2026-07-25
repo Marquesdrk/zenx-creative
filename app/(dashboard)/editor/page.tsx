@@ -69,6 +69,7 @@ export default function EditorPage() {
             ? profile.reactionMedia[index % profile.reactionMedia.length].id
             : null,
       },
+      sourceAnalysis: null,
       contentUrl: url,
     }));
 
@@ -77,8 +78,23 @@ export default function EditorPage() {
     setBatchModalOpen(false);
 
     newItems.forEach((item, index) => {
-      const cleanup = scheduleImportAnalysis(index, (status) => {
-        setItems((current) => current.map((i) => (i.id === item.id ? { ...i, status } : i)));
+      const cleanup = scheduleImportAnalysis(index, item.contentUrl, (result) => {
+        setItems((current) =>
+          current.map((i) => {
+            if (i.id !== item.id) return i;
+            if (result.status === "ANALYZING") return { ...i, status: "ANALYZING" };
+            // A normalização sugere um recorte (fase 3) — aplicado como ponto de partida,
+            // o usuário ainda pode ajustar no editor rápido.
+            return {
+              ...i,
+              status: "AWAITING_REVIEW",
+              sourceAnalysis: result.analysis,
+              manualOverrides: result.analysis
+                ? { ...i.manualOverrides, cropBox: result.analysis.suggestedCropBox }
+                : i.manualOverrides,
+            };
+          })
+        );
       });
       cleanupsRef.current.push(cleanup);
     });

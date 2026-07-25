@@ -1,17 +1,39 @@
+import { analyzeVideoSource } from "./source-analysis";
+import type { SourceAnalysis } from "./types";
+
 export const PROCESSING_STAGE_MS = 1000;
 
-/** Simula a análise automática: IMPORTING -> ANALYZING -> AWAITING_REVIEW, escalonado por item. */
+export type ImportAnalysisUpdate =
+  | { status: "ANALYZING" }
+  | { status: "AWAITING_REVIEW"; analysis: SourceAnalysis | null };
+
+/**
+ * IMPORTING -> ANALYZING -> AWAITING_REVIEW, escalonado por item. A etapa ANALYZING roda a
+ * normalização de verdade (fase 3: resolução/aspect ratio real + detecção de barras via
+ * canvas) quando há um `contentUrl` real; para arquivos do Google Drive mockado (sem
+ * conteúdo real), resolve direto com `analysis: null`.
+ */
 export function scheduleImportAnalysis(
   index: number,
-  update: (status: "ANALYZING" | "AWAITING_REVIEW") => void
+  contentUrl: string | null,
+  update: (result: ImportAnalysisUpdate) => void
 ): () => void {
+  let cancelled = false;
   const stagger = index * 300;
-  const toAnalyzing = setTimeout(() => update("ANALYZING"), stagger + PROCESSING_STAGE_MS);
-  const toAwaitingReview = setTimeout(
-    () => update("AWAITING_REVIEW"),
-    stagger + PROCESSING_STAGE_MS * 2
-  );
+
+  const toAnalyzing = setTimeout(() => {
+    if (cancelled) return;
+    update({ status: "ANALYZING" });
+  }, stagger + PROCESSING_STAGE_MS);
+
+  const toAwaitingReview = setTimeout(async () => {
+    const analysis = contentUrl ? await analyzeVideoSource(contentUrl).catch(() => null) : null;
+    if (cancelled) return;
+    update({ status: "AWAITING_REVIEW", analysis });
+  }, stagger + PROCESSING_STAGE_MS * 2);
+
   return () => {
+    cancelled = true;
     clearTimeout(toAnalyzing);
     clearTimeout(toAwaitingReview);
   };

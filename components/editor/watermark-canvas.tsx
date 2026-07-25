@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { ImageOff } from "lucide-react";
 import { VideoFrame } from "./video-frame";
-import type { UgcProfile, WatermarkPosition } from "@/lib/editor/types";
+import type { CropBox, UgcProfile, WatermarkPosition } from "@/lib/editor/types";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -13,12 +13,14 @@ export function WatermarkCanvas({
   profile,
   caption,
   contentUrl = null,
+  contentCropBox,
   watermarkPosition,
   onWatermarkPositionChange,
 }: {
   profile: UgcProfile;
   caption: string;
   contentUrl?: string | null;
+  contentCropBox?: CropBox;
   /** Posição relativa (0 a 1). */
   watermarkPosition: WatermarkPosition;
   onWatermarkPositionChange: (position: WatermarkPosition) => void;
@@ -53,7 +55,13 @@ export function WatermarkCanvas({
 
   return (
     <div ref={containerRef} className="relative select-none">
-      <VideoFrame profile={profile} caption={caption} contentUrl={contentUrl} watermarkPosition={null} />
+      <VideoFrame
+        profile={profile}
+        caption={caption}
+        contentUrl={contentUrl}
+        contentCropBox={contentCropBox}
+        watermarkPosition={null}
+      />
       <div
         role="button"
         aria-label="Arrastar marca d'água"

@@ -59,6 +59,7 @@ export function EditDrawer({
               profile={profile}
               caption={overrides.caption}
               contentUrl={draft.contentUrl}
+              contentCropBox={overrides.cropBox}
               watermarkPosition={overrides.watermarkPosition}
               onWatermarkPositionChange={(watermarkPosition) => updateOverrides({ watermarkPosition })}
             />
@@ -67,6 +68,7 @@ export function EditDrawer({
               profile={profile}
               caption={overrides.caption}
               contentUrl={draft.contentUrl}
+              contentCropBox={overrides.cropBox}
               reactionMediaUrl={
                 profile.engine === "REACT"
                   ? (profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.url ??
@@ -76,6 +78,13 @@ export function EditDrawer({
             />
           )}
         </div>
+
+        {draft.sourceAnalysis && (
+          <p className="text-[11px] text-muted">
+            {draft.sourceAnalysis.width}×{draft.sourceAnalysis.height}px
+            {draft.sourceAnalysis.hasLetterboxing ? " · barras detectadas, recorte sugerido" : ""}
+          </p>
+        )}
 
         {profile.engine === "UGC" && (
           <div className="grid grid-cols-2 gap-3">

@@ -98,12 +98,28 @@ export type ManualOverrides = {
   reactionMediaId: string | null;
 };
 
+/** Resultado da normalização da origem (fase 3): resolução/aspect ratio reais do arquivo,
+ *  detecção heurística de barras pretas/bordas uniformes (sem ML/detecção de rosto — isso
+ *  fica para uma fase com um serviço de análise dedicado) e o recorte sugerido a partir
+ *  disso. Guardado separado de `manualOverrides.cropBox`, que é o que o usuário efetivamente
+ *  aplicou (começa igual ao sugerido, mas o usuário pode ajustar). */
+export type SourceAnalysis = {
+  width: number;
+  height: number;
+  aspectRatio: number;
+  hasLetterboxing: boolean;
+  suggestedCropBox: CropBox;
+};
+
 export type BatchItem = {
   id: string;
   batchId: string;
   filename: string;
   status: BatchItemStatus;
   manualOverrides: ManualOverrides;
+  /** Null enquanto a análise (IMPORTING/ANALYZING) não terminou, ou quando não há conteúdo
+   *  real para analisar (arquivos do Google Drive mockado). */
+  sourceAnalysis: SourceAnalysis | null;
   /** Object URL do arquivo enviado, usado como prévia real do conteúdo importado. Null para
    *  arquivos vindos do Google Drive mockado, que não têm conteúdo de verdade. */
   contentUrl: string | null;

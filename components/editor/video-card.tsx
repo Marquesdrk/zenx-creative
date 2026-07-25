@@ -30,6 +30,7 @@ export function VideoCard({
             profile={profile}
             caption={item.manualOverrides.caption}
             contentUrl={item.contentUrl}
+            contentCropBox={item.manualOverrides.cropBox}
             watermarkPosition={item.manualOverrides.watermarkPosition}
             reactionMediaUrl={
               profile.engine === "REACT"

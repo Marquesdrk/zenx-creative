@@ -1,12 +1,29 @@
 import { BadgeCheck, User } from "lucide-react";
-import type { Profile, WatermarkPosition } from "@/lib/editor/types";
+import type { CropBox, Profile, WatermarkPosition } from "@/lib/editor/types";
 
 const CONTENT_GRADIENT = "bg-gradient-to-br from-neutral-700 to-neutral-900";
+const DEFAULT_CROP: CropBox = { x: 0.5, y: 0.5 };
 
-function VideoThumbnail({ url, className }: { url: string | null; className: string }) {
+function VideoThumbnail({
+  url,
+  className,
+  cropBox,
+}: {
+  url: string | null;
+  className: string;
+  /** Recorte relativo (0 a 1) aplicado via object-position — nunca estica o vídeo. */
+  cropBox?: CropBox;
+}) {
   if (url) {
     return (
-      <video src={url} muted playsInline preload="metadata" className={`${className} object-cover`} />
+      <video
+        src={url}
+        muted
+        playsInline
+        preload="metadata"
+        className={`${className} object-cover`}
+        style={cropBox ? { objectPosition: `${cropBox.x * 100}% ${cropBox.y * 100}%` } : undefined}
+      />
     );
   }
   return <div className={`${className} ${CONTENT_GRADIENT}`} />;
@@ -16,12 +33,15 @@ export function VideoFrame({
   profile,
   caption,
   contentUrl = null,
+  contentCropBox = DEFAULT_CROP,
   reactionMediaUrl = null,
   watermarkPosition = null,
 }: {
   profile: Profile;
   caption: string;
   contentUrl?: string | null;
+  /** Recorte do conteúdo importado (não da mídia de reação nem da marca d'água). */
+  contentCropBox?: CropBox;
   /** Só relevante quando profile.engine === "REACT". */
   reactionMediaUrl?: string | null;
   /** Só relevante quando profile.engine === "UGC". Posição x/y é relativa (0 a 1). */
@@ -38,7 +58,11 @@ export function VideoFrame({
             url={reactionMediaUrl}
             className="absolute inset-x-0 top-0 h-[36%] border-b border-dashed border-white/20"
           />
-          <VideoThumbnail url={contentUrl} className="absolute inset-x-0 bottom-0 top-[36%]" />
+          <VideoThumbnail
+            url={contentUrl}
+            cropBox={contentCropBox}
+            className="absolute inset-x-0 bottom-0 top-[36%]"
+          />
         </>
       )}
 
@@ -67,7 +91,11 @@ export function VideoFrame({
               <div className="truncate text-[8px] text-gray-500">{profile.handle}</div>
             </div>
           </div>
-          <VideoThumbnail url={contentUrl} className="aspect-[9/13] w-full rounded-lg" />
+          <VideoThumbnail
+            url={contentUrl}
+            cropBox={contentCropBox}
+            className="aspect-[9/13] w-full rounded-lg"
+          />
           <p className="mt-1.5 line-clamp-2 w-full text-[8px] leading-snug text-gray-300">
             {caption}
           </p>
@@ -76,7 +104,7 @@ export function VideoFrame({
 
       {profile.engine === "UGC" && (
         <>
-          <VideoThumbnail url={contentUrl} className="absolute inset-0" />
+          <VideoThumbnail url={contentUrl} cropBox={contentCropBox} className="absolute inset-0" />
           <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-foreground">
             {caption}
           </p>
