@@ -11,6 +11,9 @@ export type ReactionMedia = {
 /** Posições sempre relativas (0 a 1), nunca em pixels. */
 export type WatermarkPosition = { x: number; y: number; scale: number; opacity: number };
 export type CropBox = { x: number; y: number };
+/** Como o vídeo importado preenche o quadro do template. */
+export type FitMode = "cover" | "contain";
+export type Rotation = 0 | 90 | 180 | 270;
 
 export type ReactProfile = {
   id: string;
@@ -94,9 +97,35 @@ export type ManualOverrides = {
   caption: string;
   watermarkPosition: WatermarkPosition;
   cropBox: CropBox;
+  /** Zoom aplicado sobre o recorte (1 = sem zoom), permitindo um "recorte livre" combinando
+   *  posição (cropBox) e escala. */
+  cropZoom: number;
+  fit: FitMode;
+  rotation: Rotation;
+  /** Corte de entrada/saída, em segundos, sobre o vídeo original. trimEnd null = até o fim. */
+  trimStart: number;
+  trimEnd: number | null;
+  volume: number;
+  muted: boolean;
   /** Mídia de reação escolhida manualmente (engine REACT); null nos demais engines. */
   reactionMediaId: string | null;
 };
+
+export function createDefaultManualOverrides(
+  params: Pick<ManualOverrides, "caption" | "watermarkPosition" | "reactionMediaId">
+): ManualOverrides {
+  return {
+    ...params,
+    cropBox: { x: 0.5, y: 0.5 },
+    cropZoom: 1,
+    fit: "cover",
+    rotation: 0,
+    trimStart: 0,
+    trimEnd: null,
+    volume: 1,
+    muted: true,
+  };
+}
 
 /** Resultado da normalização da origem (fase 3): resolução/aspect ratio reais do arquivo,
  *  detecção heurística de barras pretas/bordas uniformes (sem ML/detecção de rosto — isso

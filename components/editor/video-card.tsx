@@ -31,6 +31,9 @@ export function VideoCard({
             caption={item.manualOverrides.caption}
             contentUrl={item.contentUrl}
             contentCropBox={item.manualOverrides.cropBox}
+            contentCropZoom={item.manualOverrides.cropZoom}
+            contentFit={item.manualOverrides.fit}
+            contentRotation={item.manualOverrides.rotation}
             watermarkPosition={item.manualOverrides.watermarkPosition}
             reactionMediaUrl={
               profile.engine === "REACT"

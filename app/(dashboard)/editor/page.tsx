@@ -8,7 +8,7 @@ import { useProfiles } from "@/lib/editor/profiles-store";
 import { useTemplates } from "@/lib/editor/templates-store";
 import { scheduleImportAnalysis, scheduleRender } from "@/lib/editor/mock-processing";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
-import type { Batch, BatchItem, Profile } from "@/lib/editor/types";
+import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
 
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
@@ -59,16 +59,15 @@ export default function EditorPage() {
       batchId: batch.id,
       filename,
       status: "IMPORTING",
-      manualOverrides: {
+      manualOverrides: createDefaultManualOverrides({
         caption: generateCaption(filename, profile),
         watermarkPosition: { ...watermarkDefaults },
-        cropBox: { x: 0.5, y: 0.5 },
         // Engine React carrega automaticamente as mídias de reação salvas do perfil.
         reactionMediaId:
           profile.engine === "REACT" && profile.reactionMedia.length > 0
             ? profile.reactionMedia[index % profile.reactionMedia.length].id
             : null,
-      },
+      }),
       sourceAnalysis: null,
       contentUrl: url,
     }));

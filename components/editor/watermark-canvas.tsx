@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import { ImageOff } from "lucide-react";
 import { VideoFrame } from "./video-frame";
-import type { CropBox, UgcProfile, WatermarkPosition } from "@/lib/editor/types";
+import type { CropBox, FitMode, Rotation, UgcProfile, WatermarkPosition } from "@/lib/editor/types";
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -14,6 +14,9 @@ export function WatermarkCanvas({
   caption,
   contentUrl = null,
   contentCropBox,
+  contentCropZoom,
+  contentFit,
+  contentRotation,
   watermarkPosition,
   onWatermarkPositionChange,
 }: {
@@ -21,6 +24,9 @@ export function WatermarkCanvas({
   caption: string;
   contentUrl?: string | null;
   contentCropBox?: CropBox;
+  contentCropZoom?: number;
+  contentFit?: FitMode;
+  contentRotation?: Rotation;
   /** Posição relativa (0 a 1). */
   watermarkPosition: WatermarkPosition;
   onWatermarkPositionChange: (position: WatermarkPosition) => void;
@@ -60,6 +66,9 @@ export function WatermarkCanvas({
         caption={caption}
         contentUrl={contentUrl}
         contentCropBox={contentCropBox}
+        contentCropZoom={contentCropZoom}
+        contentFit={contentFit}
+        contentRotation={contentRotation}
         watermarkPosition={null}
       />
       <div

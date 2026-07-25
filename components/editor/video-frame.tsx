@@ -1,5 +1,5 @@
 import { BadgeCheck, User } from "lucide-react";
-import type { CropBox, Profile, WatermarkPosition } from "@/lib/editor/types";
+import type { CropBox, FitMode, Profile, Rotation, WatermarkPosition } from "@/lib/editor/types";
 
 const CONTENT_GRADIENT = "bg-gradient-to-br from-neutral-700 to-neutral-900";
 const DEFAULT_CROP: CropBox = { x: 0.5, y: 0.5 };
@@ -8,11 +8,18 @@ function VideoThumbnail({
   url,
   className,
   cropBox,
+  cropZoom = 1,
+  fit = "cover",
+  rotation = 0,
 }: {
   url: string | null;
   className: string;
   /** Recorte relativo (0 a 1) aplicado via object-position — nunca estica o vídeo. */
   cropBox?: CropBox;
+  /** Zoom sobre o recorte (1 = sem zoom), combinado com cropBox para um "recorte livre". */
+  cropZoom?: number;
+  fit?: FitMode;
+  rotation?: Rotation;
 }) {
   if (url) {
     return (
@@ -21,8 +28,11 @@ function VideoThumbnail({
         muted
         playsInline
         preload="metadata"
-        className={`${className} object-cover`}
-        style={cropBox ? { objectPosition: `${cropBox.x * 100}% ${cropBox.y * 100}%` } : undefined}
+        className={`${className} ${fit === "cover" ? "object-cover" : "object-contain"}`}
+        style={{
+          objectPosition: cropBox ? `${cropBox.x * 100}% ${cropBox.y * 100}%` : undefined,
+          transform: `rotate(${rotation}deg) scale(${cropZoom})`,
+        }}
       />
     );
   }
@@ -34,6 +44,9 @@ export function VideoFrame({
   caption,
   contentUrl = null,
   contentCropBox = DEFAULT_CROP,
+  contentCropZoom = 1,
+  contentFit = "cover",
+  contentRotation = 0,
   reactionMediaUrl = null,
   watermarkPosition = null,
 }: {
@@ -42,6 +55,9 @@ export function VideoFrame({
   contentUrl?: string | null;
   /** Recorte do conteúdo importado (não da mídia de reação nem da marca d'água). */
   contentCropBox?: CropBox;
+  contentCropZoom?: number;
+  contentFit?: FitMode;
+  contentRotation?: Rotation;
   /** Só relevante quando profile.engine === "REACT". */
   reactionMediaUrl?: string | null;
   /** Só relevante quando profile.engine === "UGC". Posição x/y é relativa (0 a 1). */
@@ -61,6 +77,9 @@ export function VideoFrame({
           <VideoThumbnail
             url={contentUrl}
             cropBox={contentCropBox}
+            cropZoom={contentCropZoom}
+            fit={contentFit}
+            rotation={contentRotation}
             className="absolute inset-x-0 bottom-0 top-[36%]"
           />
         </>
@@ -94,6 +113,9 @@ export function VideoFrame({
           <VideoThumbnail
             url={contentUrl}
             cropBox={contentCropBox}
+            cropZoom={contentCropZoom}
+            fit={contentFit}
+            rotation={contentRotation}
             className="aspect-[9/13] w-full rounded-lg"
           />
           <p className="mt-1.5 line-clamp-2 w-full text-[8px] leading-snug text-gray-300">
@@ -104,7 +126,14 @@ export function VideoFrame({
 
       {profile.engine === "UGC" && (
         <>
-          <VideoThumbnail url={contentUrl} cropBox={contentCropBox} className="absolute inset-0" />
+          <VideoThumbnail
+            url={contentUrl}
+            cropBox={contentCropBox}
+            cropZoom={contentCropZoom}
+            fit={contentFit}
+            rotation={contentRotation}
+            className="absolute inset-0"
+          />
           <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-foreground">
             {caption}
           </p>

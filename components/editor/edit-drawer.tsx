@@ -1,10 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { RotateCcw, Volume2, VolumeX, X } from "lucide-react";
+import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { VideoFrame } from "./video-frame";
 import { WatermarkCanvas } from "./watermark-canvas";
-import type { BatchItem, Profile } from "@/lib/editor/types";
+import type { BatchItem, Profile, Rotation } from "@/lib/editor/types";
+
+const ROTATIONS: Rotation[] = [0, 90, 180, 270];
+
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
 
 export function EditDrawer({
   item,
@@ -19,6 +28,9 @@ export function EditDrawer({
 }) {
   const [draft, setDraft] = useState(item);
   const [applyToAll, setApplyToAll] = useState(false);
+  const [duration, setDuration] = useState(0);
+  const [redetecting, setRedetecting] = useState(false);
+  const trimVideoRef = useRef<HTMLVideoElement>(null);
   const overrides = draft.manualOverrides;
 
   useEffect(() => {
@@ -29,11 +41,30 @@ export function EditDrawer({
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
+  useEffect(() => {
+    const video = trimVideoRef.current;
+    if (!video) return;
+    video.volume = overrides.volume;
+    video.muted = overrides.muted;
+  }, [overrides.volume, overrides.muted]);
+
   function updateOverrides(patch: Partial<BatchItem["manualOverrides"]>) {
     setDraft((current) => ({
       ...current,
       manualOverrides: { ...current.manualOverrides, ...patch },
     }));
+  }
+
+  async function handleRedetect() {
+    if (!draft.contentUrl) return;
+    setRedetecting(true);
+    const analysis = await analyzeVideoSource(draft.contentUrl);
+    setDraft((current) => ({
+      ...current,
+      sourceAnalysis: analysis,
+      manualOverrides: { ...current.manualOverrides, cropBox: analysis.suggestedCropBox },
+    }));
+    setRedetecting(false);
   }
 
   return (
@@ -60,6 +91,9 @@ export function EditDrawer({
               caption={overrides.caption}
               contentUrl={draft.contentUrl}
               contentCropBox={overrides.cropBox}
+              contentCropZoom={overrides.cropZoom}
+              contentFit={overrides.fit}
+              contentRotation={overrides.rotation}
               watermarkPosition={overrides.watermarkPosition}
               onWatermarkPositionChange={(watermarkPosition) => updateOverrides({ watermarkPosition })}
             />
@@ -69,6 +103,9 @@ export function EditDrawer({
               caption={overrides.caption}
               contentUrl={draft.contentUrl}
               contentCropBox={overrides.cropBox}
+              contentCropZoom={overrides.cropZoom}
+              contentFit={overrides.fit}
+              contentRotation={overrides.rotation}
               reactionMediaUrl={
                 profile.engine === "REACT"
                   ? (profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.url ??
@@ -80,10 +117,22 @@ export function EditDrawer({
         </div>
 
         {draft.sourceAnalysis && (
-          <p className="text-[11px] text-muted">
-            {draft.sourceAnalysis.width}×{draft.sourceAnalysis.height}px
-            {draft.sourceAnalysis.hasLetterboxing ? " · barras detectadas, recorte sugerido" : ""}
-          </p>
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] text-muted">
+              {draft.sourceAnalysis.width}×{draft.sourceAnalysis.height}px
+              {draft.sourceAnalysis.hasLetterboxing ? " · barras detectadas, recorte sugerido" : ""}
+            </p>
+            {draft.contentUrl && (
+              <button
+                type="button"
+                onClick={handleRedetect}
+                disabled={redetecting}
+                className="shrink-0 text-[11px] font-semibold text-accent disabled:opacity-40"
+              >
+                {redetecting ? "Analisando…" : "Redetectar"}
+              </button>
+            )}
+          </div>
         )}
 
         {profile.engine === "UGC" && (
@@ -211,6 +260,134 @@ export function EditDrawer({
             />
           </div>
         </div>
+
+        <div>
+          <p className="mb-1 text-xs text-muted">Zoom (recorte livre)</p>
+          <input
+            id="crop-zoom"
+            type="range"
+            min={1}
+            max={3}
+            step={0.1}
+            value={overrides.cropZoom}
+            onChange={(event) => updateOverrides({ cropZoom: Number(event.target.value) })}
+            className="w-full accent-accent"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <p className="mb-1 text-xs text-muted">Rotação</p>
+            <div className="flex gap-1.5">
+              {ROTATIONS.map((rotation) => (
+                <button
+                  key={rotation}
+                  type="button"
+                  aria-pressed={overrides.rotation === rotation}
+                  onClick={() => updateOverrides({ rotation })}
+                  className={`flex h-7 flex-1 items-center justify-center rounded-lg border text-[10px] font-semibold ${
+                    overrides.rotation === rotation
+                      ? "border-accent bg-card-hover text-foreground"
+                      : "border-border bg-card text-gray-300"
+                  }`}
+                >
+                  {rotation}°
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p className="mb-1 text-xs text-muted">Preenchimento</p>
+            <div className="flex gap-1.5">
+              <button
+                type="button"
+                aria-pressed={overrides.fit === "cover"}
+                onClick={() => updateOverrides({ fit: "cover" })}
+                className={`flex h-7 flex-1 items-center justify-center rounded-lg border text-[10px] font-semibold ${
+                  overrides.fit === "cover"
+                    ? "border-accent bg-card-hover text-foreground"
+                    : "border-border bg-card text-gray-300"
+                }`}
+              >
+                Preencher
+              </button>
+              <button
+                type="button"
+                aria-pressed={overrides.fit === "contain"}
+                onClick={() => updateOverrides({ fit: "contain" })}
+                className={`flex h-7 flex-1 items-center justify-center rounded-lg border text-[10px] font-semibold ${
+                  overrides.fit === "contain"
+                    ? "border-accent bg-card-hover text-foreground"
+                    : "border-border bg-card text-gray-300"
+                }`}
+              >
+                Ajustar
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {draft.contentUrl && (
+          <div>
+            <p className="mb-1.5 text-xs text-muted">Corte e volume</p>
+            <video
+              ref={trimVideoRef}
+              src={draft.contentUrl}
+              controls
+              playsInline
+              onLoadedMetadata={(event) => setDuration(event.currentTarget.duration)}
+              className="w-full rounded-lg border border-border"
+            />
+            <div className="mt-2 flex items-center gap-2 text-[11px] text-gray-300">
+              <button
+                type="button"
+                onClick={() =>
+                  updateOverrides({ trimStart: trimVideoRef.current?.currentTime ?? 0 })
+                }
+                className="rounded-full border border-border bg-card px-2 py-1 hover:bg-card-hover"
+              >
+                Marcar início ({formatTime(overrides.trimStart)})
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  updateOverrides({ trimEnd: trimVideoRef.current?.currentTime ?? duration })
+                }
+                className="rounded-full border border-border bg-card px-2 py-1 hover:bg-card-hover"
+              >
+                Marcar fim ({overrides.trimEnd === null ? "fim" : formatTime(overrides.trimEnd)})
+              </button>
+              <button
+                type="button"
+                aria-label="Redefinir corte"
+                onClick={() => updateOverrides({ trimStart: 0, trimEnd: null })}
+                className="ml-auto rounded-full border border-border bg-card p-1.5 text-gray-400 hover:text-foreground"
+              >
+                <RotateCcw size={12} />
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              <button
+                type="button"
+                aria-label={overrides.muted ? "Ativar som" : "Silenciar"}
+                onClick={() => updateOverrides({ muted: !overrides.muted })}
+                className="shrink-0 text-gray-300 hover:text-foreground"
+              >
+                {overrides.muted ? <VolumeX size={14} /> : <Volume2 size={14} />}
+              </button>
+              <input
+                aria-label="Volume"
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={overrides.volume}
+                onChange={(event) => updateOverrides({ volume: Number(event.target.value) })}
+                className="w-full accent-accent"
+              />
+            </div>
+          </div>
+        )}
 
         <label className="flex items-center gap-2 text-xs text-gray-300">
           <input
