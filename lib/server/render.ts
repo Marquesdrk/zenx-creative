@@ -95,9 +95,12 @@ function buildContentFilters(
   const { width: effWidth, height: effHeight } = effectiveDimensions(source.width, source.height, rotation);
 
   if (fit === "contain") {
+    // Posição do conteúdo dentro das barras (mesma lógica do object-position no preview) —
+    // (ow-iw)*0.5 é o centro; usar cropBox.x/y no lugar do 0.5 fixo dá controle real de
+    // "muito alto"/"muito baixo" em vez de sempre centralizar.
     filters.push(
       `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`,
-      `pad=${targetWidth}:${targetHeight}:(ow-iw)/2:(oh-ih)/2:color=black`
+      `pad=${targetWidth}:${targetHeight}:(ow-iw)*${cropBox.x}:(oh-ih)*${cropBox.y}:color=black`
     );
   } else {
     filters.push(buildCropFilter(effWidth, effHeight, cropBox, cropZoom, targetWidth, targetHeight));

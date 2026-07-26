@@ -202,20 +202,37 @@ export function EditDrawer({
               {profile.engine === "REACT" && profile.reactionMedia.length > 0 && (
                 <div>
                   <SectionLabel>Mídia de reação</SectionLabel>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="grid grid-cols-4 gap-2">
                     {profile.reactionMedia.map((media) => (
                       <button
                         key={media.id}
                         type="button"
                         aria-pressed={overrides.reactionMediaId === media.id}
                         onClick={() => updateOverrides({ reactionMediaId: media.id })}
-                        className={`rounded-full border px-2.5 py-1 text-[11px] ${
+                        className={`flex flex-col gap-1 rounded-lg border p-1 text-left ${
                           overrides.reactionMediaId === media.id
-                            ? "border-accent bg-card-hover text-foreground"
-                            : "border-border bg-card text-gray-300"
+                            ? "border-accent bg-card-hover"
+                            : "border-border bg-card hover:bg-card-hover"
                         }`}
                       >
-                        {media.label}
+                        <div className="aspect-square overflow-hidden rounded-md bg-black">
+                          {media.url && (
+                            <video
+                              src={media.url}
+                              muted
+                              playsInline
+                              preload="metadata"
+                              onLoadedMetadata={(event) => {
+                                const video = event.currentTarget;
+                                if (Number.isFinite(video.duration)) {
+                                  video.currentTime = Math.min(0.1, video.duration / 2);
+                                }
+                              }}
+                              className="h-full w-full object-cover"
+                            />
+                          )}
+                        </div>
+                        <span className="truncate text-[10px] text-gray-300">{media.label}</span>
                       </button>
                     ))}
                   </div>
@@ -237,12 +254,17 @@ export function EditDrawer({
               )}
 
               <div>
-                <SectionLabel>Recorte</SectionLabel>
+                <SectionLabel>Posição do conteúdo</SectionLabel>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label htmlFor="crop-x" className="mb-1 block text-xs text-muted">
-                      Horizontal
-                    </label>
+                    <div className="mb-1 flex items-center justify-between">
+                      <label htmlFor="crop-x" className="text-xs text-muted">
+                        Horizontal
+                      </label>
+                      <span className="text-[11px] tabular-nums text-gray-400">
+                        {Math.round(overrides.cropBox.x * 100)}%
+                      </span>
+                    </div>
                     <input
                       id="crop-x"
                       type="range"
@@ -256,11 +278,34 @@ export function EditDrawer({
                       }
                       className="w-full accent-accent"
                     />
+                    <div className="mt-1.5 flex gap-1.5">
+                      {[
+                        { label: "Esquerda", value: 0 },
+                        { label: "Centro", value: 0.5 },
+                        { label: "Direita", value: 1 },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() =>
+                            updateOverrides({ cropBox: { ...overrides.cropBox, x: preset.value } })
+                          }
+                          className="flex-1 rounded-md border border-border bg-card py-1 text-[10px] text-gray-300 hover:bg-card-hover"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div>
-                    <label htmlFor="crop-y" className="mb-1 block text-xs text-muted">
-                      Vertical
-                    </label>
+                    <div className="mb-1 flex items-center justify-between">
+                      <label htmlFor="crop-y" className="text-xs text-muted">
+                        Vertical
+                      </label>
+                      <span className="text-[11px] tabular-nums text-gray-400">
+                        {Math.round(overrides.cropBox.y * 100)}%
+                      </span>
+                    </div>
                     <input
                       id="crop-y"
                       type="range"
@@ -274,11 +319,34 @@ export function EditDrawer({
                       }
                       className="w-full accent-accent"
                     />
+                    <div className="mt-1.5 flex gap-1.5">
+                      {[
+                        { label: "Topo", value: 0 },
+                        { label: "Centro", value: 0.5 },
+                        { label: "Base", value: 1 },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          onClick={() =>
+                            updateOverrides({ cropBox: { ...overrides.cropBox, y: preset.value } })
+                          }
+                          className="flex-1 rounded-md border border-border bg-card py-1 text-[10px] text-gray-300 hover:bg-card-hover"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                   <div className="col-span-2">
-                    <label htmlFor="crop-zoom" className="mb-1 block text-xs text-muted">
-                      Zoom (recorte livre)
-                    </label>
+                    <div className="mb-1 flex items-center justify-between">
+                      <label htmlFor="crop-zoom" className="text-xs text-muted">
+                        Zoom (recorte livre)
+                      </label>
+                      <span className="text-[11px] tabular-nums text-gray-400">
+                        {overrides.cropZoom.toFixed(1)}×
+                      </span>
+                    </div>
                     <input
                       id="crop-zoom"
                       type="range"
