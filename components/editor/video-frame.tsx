@@ -23,25 +23,31 @@ function VideoThumbnail({
 }) {
   if (url) {
     return (
-      <video
-        src={url}
-        muted
-        playsInline
-        preload="metadata"
-        // Sem isso o vídeo pausado mostra um frame preto até o usuário interagir — busca um
-        // instante adiante pra prévia já nascer com uma imagem real do conteúdo.
-        onLoadedMetadata={(event) => {
-          const video = event.currentTarget;
-          if (Number.isFinite(video.duration)) {
-            video.currentTime = Math.min(0.1, video.duration / 2);
-          }
-        }}
-        className={`${className} ${fit === "cover" ? "object-cover" : "object-contain"}`}
-        style={{
-          objectPosition: cropBox ? `${cropBox.x * 100}% ${cropBox.y * 100}%` : undefined,
-          transform: `rotate(${rotation}deg) scale(${cropZoom})`,
-        }}
-      />
+      // O zoom escala o <video> via transform — sem um wrapper com overflow-hidden do
+      // tamanho exato da zona, o vídeo ampliado vaza para fora dela (ex.: conteúdo
+      // cobrindo a faixa de reação acima). O clipping tem que ser por zona, não só no
+      // frame externo.
+      <div className={`${className} overflow-hidden`}>
+        <video
+          src={url}
+          muted
+          playsInline
+          preload="metadata"
+          // Sem isso o vídeo pausado mostra um frame preto até o usuário interagir — busca um
+          // instante adiante pra prévia já nascer com uma imagem real do conteúdo.
+          onLoadedMetadata={(event) => {
+            const video = event.currentTarget;
+            if (Number.isFinite(video.duration)) {
+              video.currentTime = Math.min(0.1, video.duration / 2);
+            }
+          }}
+          className={`h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"}`}
+          style={{
+            objectPosition: cropBox ? `${cropBox.x * 100}% ${cropBox.y * 100}%` : undefined,
+            transform: `rotate(${rotation}deg) scale(${cropZoom})`,
+          }}
+        />
+      </div>
     );
   }
   return <div className={`${className} ${CONTENT_GRADIENT}`} />;
@@ -80,7 +86,7 @@ export function VideoFrame({
         <>
           <VideoThumbnail
             url={reactionMediaUrl}
-            className="absolute inset-x-0 top-0 h-[36%] border-b border-dashed border-white/20"
+            className="absolute inset-x-0 top-0 z-10 h-[36%] border-b border-dashed border-white/20"
           />
           <VideoThumbnail
             url={contentUrl}
@@ -88,7 +94,7 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
-            className="absolute inset-x-0 bottom-0 top-[36%]"
+            className="absolute inset-x-0 bottom-0 top-[36%] z-0"
           />
         </>
       )}
