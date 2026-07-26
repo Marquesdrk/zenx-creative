@@ -1,4 +1,6 @@
 import ffmpegStatic from "ffmpeg-static";
+// @ts-expect-error -- ffprobe-static ships no type declarations.
+import ffprobeStatic from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -6,6 +8,7 @@ import path from "node:path";
 import type { BatchItem, CropBox, Profile } from "@/lib/editor/types";
 
 if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic);
+ffmpeg.setFfprobePath((ffprobeStatic as { path: string }).path);
 
 const OUTPUT_WIDTH = 1080;
 const OUTPUT_HEIGHT = 1920;
@@ -57,15 +60,39 @@ function buildCropFilter(
   return `crop=${Math.round(cropWidth)}:${Math.round(cropHeight)}:${Math.round(x)}:${Math.round(y)}`;
 }
 
+/** Consulta a resolução real do arquivo via ffprobe — nunca confia só na análise feita no
+ *  navegador (que pode falhar silenciosamente para formatos que o <video> do browser não
+ *  decodifica, mesmo que o ffmpeg consiga processar normalmente). Usar a dimensão errada
+ *  aqui faz o filtro de recorte estourar os limites do frame real e o ffmpeg falhar. */
+function probeDimensions(filePath: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, data) => {
+      if (err) {
+        reject(err);
+        return;
+      }
+      const stream = data.streams.find((s) => s.width && s.height);
+      if (!stream?.width || !stream.height) {
+        reject(new Error("Não foi possível determinar a resolução do vídeo de origem."));
+        return;
+      }
+      resolve({ width: stream.width, height: stream.height });
+    });
+  });
+}
+
 /** Filtros universais aplicados ao vídeo de conteúdo de qualquer engine: rotação seguida de
  *  recorte+zoom ("Preencher") ou escala+barras ("Ajustar"), sempre terminando em targetW x
  *  targetH. */
-function buildContentFilters(item: BatchItem, targetWidth: number, targetHeight: number): string[] {
+function buildContentFilters(
+  item: BatchItem,
+  source: { width: number; height: number },
+  targetWidth: number,
+  targetHeight: number
+): string[] {
   const { rotation, fit, cropBox, cropZoom } = item.manualOverrides;
   const filters = [...(ROTATE_FILTERS[rotation] ?? [])];
-  const srcWidth = item.sourceAnalysis?.width || targetWidth;
-  const srcHeight = item.sourceAnalysis?.height || targetHeight;
-  const { width: effWidth, height: effHeight } = effectiveDimensions(srcWidth, srcHeight, rotation);
+  const { width: effWidth, height: effHeight } = effectiveDimensions(source.width, source.height, rotation);
 
   if (fit === "contain") {
     filters.push(
@@ -110,22 +137,33 @@ function contentInputOptions(item: BatchItem): string[] {
   return options;
 }
 
-async function renderTransformOnly(item: BatchItem, contentPath: string, outputPath: string) {
-  const filters = buildContentFilters(item, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+async function renderTransformOnly(
+  item: BatchItem,
+  source: { width: number; height: number },
+  contentPath: string,
+  outputPath: string
+) {
+  const filters = buildContentFilters(item, source, OUTPUT_WIDTH, OUTPUT_HEIGHT);
   const filterGraph = [`[0:v]${filters.join(",")}[outv]`];
   await run([{ path: contentPath, options: contentInputOptions(item) }], filterGraph, outputPath, item);
 }
 
-async function renderUgc(item: BatchItem, profile: Profile, contentPath: string, outputPath: string) {
+async function renderUgc(
+  item: BatchItem,
+  profile: Profile,
+  source: { width: number; height: number },
+  contentPath: string,
+  outputPath: string
+) {
   if (profile.engine !== "UGC") throw new Error("Perfil não é UGC");
   const watermarkPath = profile.watermarkImageUrl ? publicUrlToPath(profile.watermarkImageUrl) : null;
   if (!watermarkPath || !existsSync(watermarkPath)) {
-    await renderTransformOnly(item, contentPath, outputPath);
+    await renderTransformOnly(item, source, contentPath, outputPath);
     return;
   }
   const wm = item.manualOverrides.watermarkPosition;
   const wmWidth = Math.max(32, Math.round(OUTPUT_WIDTH * 0.3 * wm.scale));
-  const contentFilters = buildContentFilters(item, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+  const contentFilters = buildContentFilters(item, source, OUTPUT_WIDTH, OUTPUT_HEIGHT);
   const filterGraph = [
     `[0:v]${contentFilters.join(",")}[base]`,
     `[1:v]scale=${wmWidth}:-1,format=rgba,colorchannelmixer=aa=${wm.opacity}[wm]`,
@@ -142,17 +180,23 @@ async function renderUgc(item: BatchItem, profile: Profile, contentPath: string,
   );
 }
 
-async function renderReact(item: BatchItem, profile: Profile, contentPath: string, outputPath: string) {
+async function renderReact(
+  item: BatchItem,
+  profile: Profile,
+  source: { width: number; height: number },
+  contentPath: string,
+  outputPath: string
+) {
   if (profile.engine !== "REACT") throw new Error("Perfil não é REACT");
   const reactionUrl = profile.reactionMedia.find((m) => m.id === item.manualOverrides.reactionMediaId)?.url ?? null;
   const reactionPath = reactionUrl ? publicUrlToPath(reactionUrl) : null;
   if (!reactionPath || !existsSync(reactionPath)) {
-    await renderTransformOnly(item, contentPath, outputPath);
+    await renderTransformOnly(item, source, contentPath, outputPath);
     return;
   }
   const topHeight = Math.round(OUTPUT_HEIGHT * 0.36);
   const bottomHeight = OUTPUT_HEIGHT - topHeight;
-  const contentFilters = buildContentFilters(item, OUTPUT_WIDTH, bottomHeight);
+  const contentFilters = buildContentFilters(item, source, OUTPUT_WIDTH, bottomHeight);
   const filterGraph = [
     `[1:v]scale=${OUTPUT_WIDTH}:${topHeight}:force_original_aspect_ratio=increase,crop=${OUTPUT_WIDTH}:${topHeight}[top]`,
     `[0:v]${contentFilters.join(",")}[bottom]`,
@@ -192,12 +236,13 @@ export async function renderBatchItem(item: BatchItem, profile: Profile): Promis
   const outputPath = path.join(RENDER_DIR, outputFilename);
 
   try {
+    const source = await probeDimensions(contentPath);
     if (profile.engine === "UGC") {
-      await renderUgc(item, profile, contentPath, outputPath);
+      await renderUgc(item, profile, source, contentPath, outputPath);
     } else if (profile.engine === "REACT") {
-      await renderReact(item, profile, contentPath, outputPath);
+      await renderReact(item, profile, source, contentPath, outputPath);
     } else {
-      await renderTransformOnly(item, contentPath, outputPath);
+      await renderTransformOnly(item, source, contentPath, outputPath);
     }
     return { renderedUrl: `/renders/${outputFilename}` };
   } catch (err) {
