@@ -138,6 +138,10 @@ export type SourceAnalysis = {
   aspectRatio: number;
   hasLetterboxing: boolean;
   suggestedCropBox: CropBox;
+  /** Zoom sugerido pra excluir as barras detectadas do recorte — sem isso, reposicionar não
+   *  teria efeito quando a origem já preenche o quadro alvo por completo (zoom 1x = sem
+   *  folga pra mover). */
+  suggestedZoom: number;
 };
 
 export type BatchItem = {

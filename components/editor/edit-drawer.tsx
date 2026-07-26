@@ -66,7 +66,11 @@ export function EditDrawer({
     setDraft((current) => ({
       ...current,
       sourceAnalysis: analysis,
-      manualOverrides: { ...current.manualOverrides, cropBox: analysis.suggestedCropBox },
+      manualOverrides: {
+        ...current.manualOverrides,
+        cropBox: analysis.suggestedCropBox,
+        cropZoom: analysis.suggestedZoom,
+      },
     }));
     setRedetecting(false);
   }

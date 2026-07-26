@@ -121,7 +121,7 @@ export default function EditorPage() {
         status: "AWAITING_REVIEW",
         sourceAnalysis: analysis,
         manualOverrides: analysis
-          ? { ...item.manualOverrides, cropBox: analysis.suggestedCropBox }
+          ? { ...item.manualOverrides, cropBox: analysis.suggestedCropBox, cropZoom: analysis.suggestedZoom }
           : item.manualOverrides,
       };
       const patched = await fetch(`/api/batch-items/${item.id}`, {

@@ -4,9 +4,12 @@ const MAX_BORDER_SCAN_RATIO = 0.22;
 const SAMPLE_STEP = 8;
 const DARK_LUMA_THRESHOLD = 20;
 
+const MAX_SUGGESTED_ZOOM = 2;
+
 const NEUTRAL_ANALYSIS: Omit<SourceAnalysis, "width" | "height" | "aspectRatio"> = {
   hasLetterboxing: false,
   suggestedCropBox: { x: 0.5, y: 0.5 },
+  suggestedZoom: 1,
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -71,12 +74,18 @@ function detectBorders(data: Uint8ClampedArray, width: number, height: number) {
 
 /** Analisa um frame já desenhado no canvas: detecta barras pretas/bordas uniformes e sugere
  *  um recorte que prioriza remover essas áreas, centralizando o conteúdo restante — nunca
- *  estica, só recorta. */
+ *  estica, só recorta.
+ *
+ *  Detectar a posição sozinha não bastava: se a origem já tem a mesma proporção do quadro
+ *  alvo (comum em vídeo vertical), o recorte a zoom 1x cobre o frame inteiro e mover a
+ *  posição não tem nenhum efeito visível — não sobra espaço pra deslocar. O zoom sugerido
+ *  aqui aperta a janela de recorte o suficiente pra excluir as barras detectadas, o que
+ *  também é o que dá "folga" real pra reposicionar depois. */
 export function analyzeFrame(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number
-): { hasLetterboxing: boolean; suggestedCropBox: CropBox } {
+): { hasLetterboxing: boolean; suggestedCropBox: CropBox; suggestedZoom: number } {
   const { top, bottom, left, right } = detectBorders(
     ctx.getImageData(0, 0, width, height).data,
     width,
@@ -87,9 +96,13 @@ export function analyzeFrame(
   const contentHeight = Math.max(1, height - top - bottom);
   const centerX = (left + contentWidth / 2) / width;
   const centerY = (top + contentHeight / 2) / height;
+  const zoomForWidth = width / contentWidth;
+  const zoomForHeight = height / contentHeight;
+  const suggestedZoom = clamp(Math.max(zoomForWidth, zoomForHeight), 1, MAX_SUGGESTED_ZOOM);
   return {
     hasLetterboxing,
     suggestedCropBox: { x: clamp(centerX, 0, 1), y: clamp(centerY, 0, 1) },
+    suggestedZoom,
   };
 }
 
@@ -131,8 +144,8 @@ export function analyzeVideoSource(url: string): Promise<SourceAnalysis> {
         }
         try {
           ctx.drawImage(video, 0, 0, width, height);
-          const { hasLetterboxing, suggestedCropBox } = analyzeFrame(ctx, width, height);
-          finish({ ...base, hasLetterboxing, suggestedCropBox });
+          const { hasLetterboxing, suggestedCropBox, suggestedZoom } = analyzeFrame(ctx, width, height);
+          finish({ ...base, hasLetterboxing, suggestedCropBox, suggestedZoom });
         } catch {
           finish({ ...base, ...NEUTRAL_ANALYSIS });
         }
