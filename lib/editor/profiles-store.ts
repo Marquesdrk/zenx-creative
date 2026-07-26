@@ -1,70 +1,74 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { MOCK_PROFILES } from "./mock-profiles";
 import type { Engine, Profile } from "./types";
 
-// v4: watermark defaults moved out of the profile into a separate Template entity
-// (`templateId` added, `watermarkDefaults` removed) — bump the key so old stored data,
-// incompatible with the new shape, is ignored.
-const STORAGE_KEY = "zenx-editor-profiles-v4";
+let cache: Profile[] | null = null;
+let hydrating: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
-let cachedRaw: string | null = null;
-let cachedProfiles: Profile[] = MOCK_PROFILES;
-
-function parseProfiles(raw: string | null): Profile[] {
-  if (!raw) return MOCK_PROFILES;
-  try {
-    const parsed = JSON.parse(raw) as Profile[];
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : MOCK_PROFILES;
-  } catch {
-    return MOCK_PROFILES;
-  }
+function notify() {
+  listeners.forEach((listener) => listener());
 }
 
-/** Memoized snapshot: only re-parses (and returns a new reference) when the
- *  stored value actually changed, so useSyncExternalStore doesn't re-render
- *  on every read. */
-function getSnapshot(): Profile[] {
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (raw !== cachedRaw) {
-    cachedRaw = raw;
-    cachedProfiles = parseProfiles(raw);
-  }
-  return cachedProfiles;
-}
-
-function getServerSnapshot(): Profile[] {
-  return MOCK_PROFILES;
+function ensureHydrated() {
+  if (cache !== null || hydrating) return;
+  hydrating = Promise.resolve()
+    .then(() => fetch("/api/profiles"))
+    .then((res) => res.json())
+    .then((data: Profile[]) => {
+      cache = data;
+      notify();
+    })
+    .catch(() => {
+      cache = [];
+      notify();
+    });
 }
 
 function subscribe(onStoreChange: () => void) {
   listeners.add(onStoreChange);
+  ensureHydrated();
   return () => listeners.delete(onStoreChange);
 }
 
-function writeProfiles(profiles: Profile[]) {
-  cachedProfiles = profiles;
-  cachedRaw = JSON.stringify(profiles);
-  window.localStorage.setItem(STORAGE_KEY, cachedRaw);
-  listeners.forEach((listener) => listener());
+function getSnapshot(): Profile[] | null {
+  return cache;
+}
+
+function getServerSnapshot(): Profile[] | null {
+  return null;
+}
+
+function persist(profiles: Profile[]) {
+  Promise.resolve()
+    .then(() =>
+      fetch("/api/profiles", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profiles),
+      })
+    )
+    .catch(() => {});
 }
 
 /**
- * Perfis do Editor em massa, persistidos no navegador (sem backend ainda).
- * Configurações e Editor em massa compartilham a mesma fonte, então editar
- * um perfil ali já reflete no próximo lote criado.
+ * Perfis do Editor em massa, persistidos no servidor (SQLite). Configurações e Editor em
+ * massa compartilham a mesma fonte, então editar um perfil ali já reflete no próximo lote
+ * criado. A escrita é otimista: atualiza o cache local na hora e sincroniza com o servidor
+ * em segundo plano.
  */
 export function useProfiles(): [Profile[], (next: Profile[] | ((current: Profile[]) => Profile[])) => void] {
-  const profiles = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   function setProfiles(next: Profile[] | ((current: Profile[]) => Profile[])) {
-    const resolved = typeof next === "function" ? next(getSnapshot()) : next;
-    writeProfiles(resolved);
+    const resolved = typeof next === "function" ? next(cache ?? []) : next;
+    cache = resolved;
+    notify();
+    persist(resolved);
   }
 
-  return [profiles, setProfiles];
+  return [snapshot ?? [], setProfiles];
 }
 
 /** `templateId` deve apontar para um Template já criado (ver lib/editor/templates-store.ts) —

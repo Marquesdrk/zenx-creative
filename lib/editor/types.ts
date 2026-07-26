@@ -149,15 +149,55 @@ export type BatchItem = {
   /** Null enquanto a análise (IMPORTING/ANALYZING) não terminou, ou quando não há conteúdo
    *  real para analisar (arquivos do Google Drive mockado). */
   sourceAnalysis: SourceAnalysis | null;
-  /** Object URL do arquivo enviado, usado como prévia real do conteúdo importado. Null para
+  /** URL pública do arquivo enviado (`/uploads/...`), servida pelo Next.js. Null para
    *  arquivos vindos do Google Drive mockado, que não têm conteúdo de verdade. */
   contentUrl: string | null;
+  /** URL pública do vídeo renderizado (`/renders/...`), preenchida quando status = COMPLETED. */
+  renderedUrl: string | null;
+  /** Mensagem de erro quando status = FAILED. */
+  error: string | null;
 };
 
 export const ENGINE_LABELS: Record<Engine, string> = {
   REACT: "React",
   X_STYLE: "X Style",
   UGC: "UGC",
+};
+
+/** Destino de publicação de um item renderizado. Kwai não tem API pública de publicação
+ *  para terceiros — fica registrado só para acompanhamento manual. */
+export type Platform = "INSTAGRAM" | "FACEBOOK" | "YOUTUBE" | "TIKTOK" | "KWAI";
+
+export type PublicationStatus = "PENDING" | "PUBLISHED" | "FAILED";
+
+export type Publication = {
+  id: string;
+  batchItemId: string;
+  platform: Platform;
+  status: PublicationStatus;
+  externalId: string | null;
+  permalink: string | null;
+  error: string | null;
+  createdAt: string;
+  publishedAt: string | null;
+};
+
+export type MetricSnapshot = {
+  id: string;
+  publicationId: string;
+  capturedAt: string;
+  views: number;
+  likes: number;
+  comments: number;
+  shares: number;
+};
+
+export const PLATFORM_LABELS: Record<Platform, string> = {
+  INSTAGRAM: "Instagram",
+  FACEBOOK: "Facebook",
+  YOUTUBE: "YouTube",
+  TIKTOK: "TikTok",
+  KWAI: "Kwai",
 };
 
 export function computeBatchStatus(items: BatchItem[]): BatchStatus {

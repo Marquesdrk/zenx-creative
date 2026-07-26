@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  // ffmpeg-static resolves its binary path from __dirname at import time — bundling it
+  // rewrites that path and breaks it, so it must run via native require instead.
+  serverExternalPackages: ["ffmpeg-static", "fluent-ffmpeg"],
 };
 
 export default nextConfig;

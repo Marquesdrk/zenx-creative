@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import { Trash2 } from "lucide-react";
+import { uploadFile } from "@/lib/editor/upload-file";
 import type { ReactProfile, ReactionMedia } from "@/lib/editor/types";
 
 export function ReactProfileForm({
@@ -13,14 +14,16 @@ export function ReactProfileForm({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleFilesSelected(files: FileList | null) {
+  async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const newMedia: ReactionMedia[] = Array.from(files).map((file) => ({
-      id: crypto.randomUUID(),
-      label: file.name,
-      url: URL.createObjectURL(file),
-    }));
-    onChange({ ...profile, reactionMedia: [...profile.reactionMedia, ...newMedia] });
+    const uploaded = await Promise.all(
+      Array.from(files).map(async (file) => ({
+        id: crypto.randomUUID(),
+        label: file.name,
+        url: await uploadFile(file),
+      }))
+    );
+    onChange({ ...profile, reactionMedia: [...profile.reactionMedia, ...uploaded] });
   }
 
   function updateMedia(id: string, patch: Partial<ReactionMedia>) {
@@ -31,8 +34,6 @@ export function ReactProfileForm({
   }
 
   function removeMedia(id: string) {
-    const media = profile.reactionMedia.find((m) => m.id === id);
-    if (media?.url) URL.revokeObjectURL(media.url);
     onChange({ ...profile, reactionMedia: profile.reactionMedia.filter((m) => m.id !== id) });
   }
 

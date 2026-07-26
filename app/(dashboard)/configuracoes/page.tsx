@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { BadgeCheck } from "lucide-react";
 import { ProfileAvatar } from "@/components/editor/profile-avatar";
+import { DriveConnectionCard } from "@/components/settings/drive-connection-card";
 import { ProfileSettingsForm } from "@/components/settings/profile-settings-form";
 import { createBlankProfile, useProfiles } from "@/lib/editor/profiles-store";
 import { createDefaultTemplate, useTemplates } from "@/lib/editor/templates-store";
@@ -68,6 +69,10 @@ export default function ConfiguracoesPage() {
         Cada perfil pertence a um engine só, com os campos daquele engine. As mudanças aqui já
         valem para o próximo lote criado.
       </p>
+
+      <Suspense fallback={null}>
+        <DriveConnectionCard />
+      </Suspense>
 
       <div className="flex gap-6">
         <div className="flex w-[240px] shrink-0 flex-col gap-4">

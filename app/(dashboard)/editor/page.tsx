@@ -1,14 +1,19 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
+import { CompletedItemsPanel } from "@/components/editor/completed-items-panel";
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
 import { useProfiles } from "@/lib/editor/profiles-store";
 import { useTemplates } from "@/lib/editor/templates-store";
-import { scheduleImportAnalysis, scheduleRender } from "@/lib/editor/mock-processing";
+import { analyzeVideoSource } from "@/lib/editor/source-analysis";
+import { uploadFile } from "@/lib/editor/upload-file";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
 import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
+
+const POLL_MS = 1500;
+const ACTIVE_STATUSES = new Set(["IMPORTING", "ANALYZING", "PROCESSING"]);
 
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
@@ -23,113 +28,146 @@ export default function EditorPage() {
   const [templates] = useTemplates();
   const [batches, setBatches] = useState<Batch[]>([]);
   const [items, setItems] = useState<BatchItem[]>([]);
-  const [sentToDriveCount, setSentToDriveCount] = useState(0);
   const [isBatchModalOpen, setBatchModalOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
-  const cleanupsRef = useRef<Array<() => void>>([]);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    const cleanups = cleanupsRef.current;
-    return () => {
-      cleanups.forEach((cleanup) => cleanup());
-    };
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch("/api/batches");
+      if (!res.ok) return;
+      const data = (await res.json()) as { batches: Batch[]; items: BatchItem[] };
+      setBatches(data.batches);
+      setItems(data.items);
+    } catch {
+      // Sem servidor disponível (ex.: ambiente de teste) — mantém o estado vazio.
+    }
   }, []);
 
-  function handleBatchSubmit(params: { profileId: string; files: BatchSourceFile[] }) {
+  useEffect(() => {
+    void (async () => {
+      await refresh();
+    })();
+  }, [refresh]);
+
+  useEffect(() => {
+    const hasActive = items.some((item) => ACTIVE_STATUSES.has(item.status));
+    if (hasActive && !pollRef.current) {
+      pollRef.current = setInterval(refresh, POLL_MS);
+    } else if (!hasActive && pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, [items, refresh]);
+
+  async function handleBatchSubmit(params: { profileId: string; files: BatchSourceFile[] }) {
     const profile = profiles.find((p) => p.id === params.profileId);
     if (!profile) return;
+    setBatchModalOpen(false);
 
-    const batch: Batch = {
-      id: crypto.randomUUID(),
-      profileId: params.profileId,
-      engine: profile.engine,
-      createdAt: new Date().toISOString(),
-    };
-
-    // Nível 2 (padrão do template) substitui o nível 1 (padrão global) quando definido.
-    // Só é relevante para perfis UGC; os demais engines não têm marca d'água.
     const template = templates.find((t) => t.id === profile.templateId);
     const watermarkDefaults =
       profile.engine === "UGC" && template?.engine === "UGC"
         ? resolveWatermarkDefaults(template)
         : GLOBAL_WATERMARK_DEFAULTS;
 
-    const newItems: BatchItem[] = params.files.map(({ name: filename, url }, index) => ({
-      id: crypto.randomUUID(),
-      batchId: batch.id,
-      filename,
-      status: "IMPORTING",
-      manualOverrides: createDefaultManualOverrides({
-        caption: generateCaption(filename, profile),
-        watermarkPosition: { ...watermarkDefaults },
-        // Engine React carrega automaticamente as mídias de reação salvas do perfil.
+    // Envia os arquivos reais ao servidor antes de criar o lote — contentUrl passa a ser
+    // uma URL pública persistida (/uploads/...), não um object URL que se perde ao recarregar.
+    const uploaded = await Promise.all(
+      params.files.map(async ({ name, file }, index) => ({
+        filename: name,
+        contentUrl: file ? await uploadFile(file) : null,
         reactionMediaId:
           profile.engine === "REACT" && profile.reactionMedia.length > 0
             ? profile.reactionMedia[index % profile.reactionMedia.length].id
             : null,
-      }),
-      sourceAnalysis: null,
-      contentUrl: url,
-    }));
-
-    setBatches((current) => [...current, batch]);
-    setItems((current) => [...newItems, ...current]);
-    setBatchModalOpen(false);
-
-    newItems.forEach((item, index) => {
-      const cleanup = scheduleImportAnalysis(index, item.contentUrl, (result) => {
-        setItems((current) =>
-          current.map((i) => {
-            if (i.id !== item.id) return i;
-            if (result.status === "ANALYZING") return { ...i, status: "ANALYZING" };
-            // A normalização sugere um recorte (fase 3) — aplicado como ponto de partida,
-            // o usuário ainda pode ajustar no editor rápido.
-            return {
-              ...i,
-              status: "AWAITING_REVIEW",
-              sourceAnalysis: result.analysis,
-              manualOverrides: result.analysis
-                ? { ...i.manualOverrides, cropBox: result.analysis.suggestedCropBox }
-                : i.manualOverrides,
-            };
-          })
-        );
-      });
-      cleanupsRef.current.push(cleanup);
-    });
-  }
-
-  function handleConfirmBatch(batchId: string) {
-    const pendingItems = items.filter(
-      (i) => i.batchId === batchId && i.status === "AWAITING_REVIEW"
+      }))
     );
 
-    pendingItems.forEach((item, index) => {
-      const cleanup = scheduleRender(index, (status) => {
-        if (status === "COMPLETED") {
-          // Item concluído é considerado entregue ao Google Drive: sai da grade ativa.
-          setSentToDriveCount((count) => count + 1);
-          setItems((current) => current.filter((i) => i.id !== item.id));
-          if (item.contentUrl) URL.revokeObjectURL(item.contentUrl);
-        } else {
-          setItems((current) => current.map((i) => (i.id === item.id ? { ...i, status } : i)));
-        }
-      });
-      cleanupsRef.current.push(cleanup);
+    const res = await fetch("/api/batches", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        profileId: profile.id,
+        engine: profile.engine,
+        items: uploaded.map((u) => ({
+          filename: u.filename,
+          contentUrl: u.contentUrl,
+          status: u.contentUrl ? "ANALYZING" : "AWAITING_REVIEW",
+          manualOverrides: createDefaultManualOverrides({
+            caption: generateCaption(u.filename, profile),
+            watermarkPosition: { ...watermarkDefaults },
+            reactionMediaId: u.reactionMediaId,
+          }),
+        })),
+      }),
+    });
+    const created = (await res.json()) as { batch: Batch; items: BatchItem[] };
+    setBatches((current) => [...current, created.batch]);
+    setItems((current) => [...created.items, ...current]);
+
+    // Normalização (fase 3) roda no navegador (heurística de barras via canvas) — o
+    // resultado é salvo no servidor assim que termina.
+    created.items.forEach(async (item) => {
+      if (!item.contentUrl) return;
+      const analysis = await analyzeVideoSource(item.contentUrl).catch(() => null);
+      const patch: Partial<BatchItem> = {
+        status: "AWAITING_REVIEW",
+        sourceAnalysis: analysis,
+        manualOverrides: analysis
+          ? { ...item.manualOverrides, cropBox: analysis.suggestedCropBox }
+          : item.manualOverrides,
+      };
+      const patched = await fetch(`/api/batch-items/${item.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      }).then((r) => r.json() as Promise<BatchItem>);
+      setItems((current) => current.map((i) => (i.id === patched.id ? patched : i)));
     });
   }
 
-  function handleSaveEdit(updated: BatchItem, applyToAll: boolean) {
+  async function handleConfirmBatch(batchId: string) {
     setItems((current) =>
-      current.map((i) => {
-        if (i.id === updated.id) return updated;
-        if (applyToAll && i.batchId === updated.batchId) {
-          return { ...i, manualOverrides: updated.manualOverrides };
+      current.map((item) =>
+        item.batchId === batchId && item.status === "AWAITING_REVIEW"
+          ? { ...item, status: "PROCESSING" }
+          : item
+      )
+    );
+    await fetch(`/api/batches/${batchId}/confirm`, { method: "POST" });
+    refresh();
+  }
+
+  async function handleSaveEdit(updated: BatchItem, applyToAll: boolean) {
+    setEditingItemId(null);
+    const targets = applyToAll ? items.filter((i) => i.batchId === updated.batchId) : [updated];
+    setItems((current) =>
+      current.map((item) => {
+        if (item.id === updated.id) return updated;
+        if (applyToAll && item.batchId === updated.batchId) {
+          return { ...item, manualOverrides: updated.manualOverrides };
         }
-        return i;
+        return item;
       })
     );
-    setEditingItemId(null);
+    await Promise.all(
+      targets.map((target) =>
+        fetch(`/api/batch-items/${target.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            target.id === updated.id ? updated : { manualOverrides: updated.manualOverrides }
+          ),
+        })
+      )
+    );
   }
 
   const editingItem = items.find((i) => i.id === editingItemId) ?? null;
@@ -138,6 +176,8 @@ export default function EditorPage() {
     ? profiles.find((p) => p.id === editingBatch.profileId)
     : null;
 
+  const activeItems = items.filter((i) => i.status !== "COMPLETED");
+  const completedItems = items.filter((i) => i.status === "COMPLETED");
   const awaitingReviewCount = items.filter((i) => i.status === "AWAITING_REVIEW").length;
 
   return (
@@ -157,8 +197,8 @@ export default function EditorPage() {
         legenda automaticamente.
       </p>
       <p className="mb-8 mt-1 text-xs text-muted">
-        Ao confirmar um lote, os vídeos são renderizados em fila e seguem para o Google Drive,
-        pasta &quot;Vídeos para postar&quot; (a configurar).
+        Ao confirmar um lote, os vídeos são renderizados de verdade (ffmpeg) e, se o Google Drive
+        estiver conectado, enviados para a pasta &quot;Vídeos para postar&quot;.
       </p>
 
       <div className="mb-6 grid grid-cols-3 gap-4">
@@ -167,8 +207,8 @@ export default function EditorPage() {
           <div className="text-xs text-muted">aguardando revisão</div>
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
-          <div className="text-xl font-bold text-foreground">{sentToDriveCount}</div>
-          <div className="text-xs text-muted">enviados ao Drive</div>
+          <div className="text-xl font-bold text-foreground">{completedItems.length}</div>
+          <div className="text-xs text-muted">renderizados</div>
         </div>
         <div className="rounded-xl border border-border bg-card p-4">
           <div className="text-xl font-bold text-foreground">{batches.length}</div>
@@ -177,12 +217,14 @@ export default function EditorPage() {
       </div>
 
       <VideoGrid
-        items={items}
+        items={activeItems}
         batches={batches}
         profiles={profiles}
         onEdit={(item) => setEditingItemId(item.id)}
         onConfirmBatch={handleConfirmBatch}
       />
+
+      <CompletedItemsPanel items={completedItems} batches={batches} profiles={profiles} />
 
       {isBatchModalOpen && (
         <BatchModal

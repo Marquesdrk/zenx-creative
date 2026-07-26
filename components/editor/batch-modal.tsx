@@ -9,7 +9,9 @@ import { ENGINE_LABELS, type Profile } from "@/lib/editor/types";
 
 type Source = "upload" | "drive";
 
-export type BatchSourceFile = { name: string; url: string | null };
+/** `file` é o objeto real (será enviado ao servidor por quem trata o submit); null para
+ *  arquivos do Google Drive mockado, que não têm conteúdo de verdade. */
+export type BatchSourceFile = { name: string; file: File | null };
 
 export function BatchModal({
   profiles,
@@ -41,8 +43,8 @@ export function BatchModal({
     if (!canSubmit || !selectedProfile) return;
     const files: BatchSourceFile[] =
       source === "upload"
-        ? uploadedFiles.map((file) => ({ name: file.name, url: URL.createObjectURL(file) }))
-        : selectedDriveFiles.map((name) => ({ name, url: null }));
+        ? uploadedFiles.map((file) => ({ name: file.name, file }))
+        : selectedDriveFiles.map((name) => ({ name, file: null }));
     onSubmit({ profileId: selectedProfile.id, files });
   }
 

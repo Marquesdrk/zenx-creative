@@ -1,69 +1,76 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import { MOCK_TEMPLATES } from "./mock-templates";
 import type { Engine, Template } from "./types";
 
-const STORAGE_KEY = "zenx-editor-templates-v1";
+let cache: Template[] | null = null;
+let hydrating: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
-let cachedRaw: string | null = null;
-let cachedTemplates: Template[] = MOCK_TEMPLATES;
-
-function parseTemplates(raw: string | null): Template[] {
-  if (!raw) return MOCK_TEMPLATES;
-  try {
-    const parsed = JSON.parse(raw) as Template[];
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : MOCK_TEMPLATES;
-  } catch {
-    return MOCK_TEMPLATES;
-  }
+function notify() {
+  listeners.forEach((listener) => listener());
 }
 
-function getSnapshot(): Template[] {
-  const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (raw !== cachedRaw) {
-    cachedRaw = raw;
-    cachedTemplates = parseTemplates(raw);
-  }
-  return cachedTemplates;
-}
-
-function getServerSnapshot(): Template[] {
-  return MOCK_TEMPLATES;
+function ensureHydrated() {
+  if (cache !== null || hydrating) return;
+  hydrating = Promise.resolve()
+    .then(() => fetch("/api/templates"))
+    .then((res) => res.json())
+    .then((data: Template[]) => {
+      cache = data;
+      notify();
+    })
+    .catch(() => {
+      cache = [];
+      notify();
+    });
 }
 
 function subscribe(onStoreChange: () => void) {
   listeners.add(onStoreChange);
+  ensureHydrated();
   return () => listeners.delete(onStoreChange);
 }
 
-function writeTemplates(templates: Template[]) {
-  cachedTemplates = templates;
-  cachedRaw = JSON.stringify(templates);
-  window.localStorage.setItem(STORAGE_KEY, cachedRaw);
-  listeners.forEach((listener) => listener());
+function getSnapshot(): Template[] | null {
+  return cache;
+}
+
+function getServerSnapshot(): Template[] | null {
+  return null;
+}
+
+function persist(templates: Template[]) {
+  Promise.resolve()
+    .then(() =>
+      fetch("/api/templates", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(templates),
+      })
+    )
+    .catch(() => {});
 }
 
 /**
- * Templates do Editor em massa (fase 2 — antes ficavam embutidos no próprio perfil).
- * Cada perfil aponta para um via `templateId`. Hoje é sempre 1:1 (cada perfil cria o
- * próprio template ao ser criado), mas o modelo já suporta vários perfis reaproveitando
- * o mesmo template — isso fica para uma fase futura de UI. Sem backend/versionamento
- * ainda (template_versions depende de um banco real).
+ * Templates do Editor em massa, persistidos no servidor (SQLite). Cada perfil aponta para
+ * um via `templateId`. Hoje é sempre 1:1 (cada perfil cria o próprio template ao ser
+ * criado), mas o modelo já suporta vários perfis reaproveitando o mesmo template.
  */
 export function useTemplates(): [
   Template[],
   (next: Template[] | ((current: Template[]) => Template[])) => void,
 ] {
-  const templates = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   function setTemplates(next: Template[] | ((current: Template[]) => Template[])) {
-    const resolved = typeof next === "function" ? next(getSnapshot()) : next;
-    writeTemplates(resolved);
+    const resolved = typeof next === "function" ? next(cache ?? []) : next;
+    cache = resolved;
+    notify();
+    persist(resolved);
   }
 
-  return [templates, setTemplates];
+  return [snapshot ?? [], setTemplates];
 }
 
 export function createDefaultTemplate(engine: Engine, name: string): Template {

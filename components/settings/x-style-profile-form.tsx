@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef } from "react";
+import { uploadFile } from "@/lib/editor/upload-file";
 import type { XStyleProfile } from "@/lib/editor/types";
 
 export function XStyleProfileForm({
@@ -12,11 +13,11 @@ export function XStyleProfileForm({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  function handleAvatarSelected(files: FileList | null) {
+  async function handleAvatarSelected(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
-    if (profile.avatarUrl) URL.revokeObjectURL(profile.avatarUrl);
-    onChange({ ...profile, avatarUrl: URL.createObjectURL(file) });
+    const url = await uploadFile(file);
+    onChange({ ...profile, avatarUrl: url });
   }
 
   return (

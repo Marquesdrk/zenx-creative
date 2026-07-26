@@ -3,6 +3,7 @@
 import { useRef } from "react";
 import { WatermarkCanvas } from "@/components/editor/watermark-canvas";
 import { GLOBAL_WATERMARK_DEFAULTS } from "@/lib/editor/settings";
+import { uploadFile } from "@/lib/editor/upload-file";
 import type { UgcProfile, UgcTemplate, WatermarkPosition } from "@/lib/editor/types";
 
 export function UgcProfileForm({
@@ -24,11 +25,11 @@ export function UgcProfileForm({
     onChangeTemplate({ ...template, watermarkDefaults: { ...watermark, ...patch } });
   }
 
-  function handleImageSelected(files: FileList | null) {
+  async function handleImageSelected(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
-    if (profile.watermarkImageUrl) URL.revokeObjectURL(profile.watermarkImageUrl);
-    onChangeProfile({ ...profile, watermarkImageUrl: URL.createObjectURL(file) });
+    const url = await uploadFile(file);
+    onChangeProfile({ ...profile, watermarkImageUrl: url });
   }
 
   return (
