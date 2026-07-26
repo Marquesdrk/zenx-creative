@@ -36,6 +36,9 @@ export function EditDrawer({
   const [redetecting, setRedetecting] = useState(false);
   const trimVideoRef = useRef<HTMLVideoElement>(null);
   const overrides = draft.manualOverrides;
+  // Em zoom 1x o recorte cobre o quadro inteiro (sem sobra) — mover a posição não tem
+  // nenhum efeito visível até dar zoom, então os controles ficam desabilitados até lá.
+  const canReposition = overrides.cropZoom > 1.001;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -260,88 +263,6 @@ export function EditDrawer({
               <div>
                 <SectionLabel>Posição do conteúdo</SectionLabel>
                 <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="mb-1 flex items-center justify-between">
-                      <label htmlFor="crop-x" className="text-xs text-muted">
-                        Horizontal
-                      </label>
-                      <span className="text-[11px] tabular-nums text-gray-400">
-                        {Math.round(overrides.cropBox.x * 100)}%
-                      </span>
-                    </div>
-                    <input
-                      id="crop-x"
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={Math.round(overrides.cropBox.x * 100)}
-                      onChange={(event) =>
-                        updateOverrides({
-                          cropBox: { ...overrides.cropBox, x: Number(event.target.value) / 100 },
-                        })
-                      }
-                      className="w-full accent-accent"
-                    />
-                    <div className="mt-1.5 flex gap-1.5">
-                      {[
-                        { label: "Esquerda", value: 0 },
-                        { label: "Centro", value: 0.5 },
-                        { label: "Direita", value: 1 },
-                      ].map((preset) => (
-                        <button
-                          key={preset.label}
-                          type="button"
-                          onClick={() =>
-                            updateOverrides({ cropBox: { ...overrides.cropBox, x: preset.value } })
-                          }
-                          className="flex-1 rounded-md border border-border bg-card py-1 text-[10px] text-gray-300 hover:bg-card-hover"
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div>
-                    <div className="mb-1 flex items-center justify-between">
-                      <label htmlFor="crop-y" className="text-xs text-muted">
-                        Vertical
-                      </label>
-                      <span className="text-[11px] tabular-nums text-gray-400">
-                        {Math.round(overrides.cropBox.y * 100)}%
-                      </span>
-                    </div>
-                    <input
-                      id="crop-y"
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={Math.round(overrides.cropBox.y * 100)}
-                      onChange={(event) =>
-                        updateOverrides({
-                          cropBox: { ...overrides.cropBox, y: Number(event.target.value) / 100 },
-                        })
-                      }
-                      className="w-full accent-accent"
-                    />
-                    <div className="mt-1.5 flex gap-1.5">
-                      {[
-                        { label: "Topo", value: 0 },
-                        { label: "Centro", value: 0.5 },
-                        { label: "Base", value: 1 },
-                      ].map((preset) => (
-                        <button
-                          key={preset.label}
-                          type="button"
-                          onClick={() =>
-                            updateOverrides({ cropBox: { ...overrides.cropBox, y: preset.value } })
-                          }
-                          className="flex-1 rounded-md border border-border bg-card py-1 text-[10px] text-gray-300 hover:bg-card-hover"
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
                   <div className="col-span-2">
                     <div className="mb-1 flex items-center justify-between">
                       <label htmlFor="crop-zoom" className="text-xs text-muted">
@@ -361,6 +282,98 @@ export function EditDrawer({
                       onChange={(event) => updateOverrides({ cropZoom: Number(event.target.value) })}
                       className="w-full accent-accent"
                     />
+                    {!canReposition && (
+                      <p className="mt-1 text-[11px] text-amber-400">
+                        Em 1.0× o vídeo já preenche o quadro todo — não há para onde mover. Aumente o
+                        zoom para liberar Horizontal/Vertical abaixo.
+                      </p>
+                    )}
+                  </div>
+                  <div className={canReposition ? undefined : "opacity-40"}>
+                    <div className="mb-1 flex items-center justify-between">
+                      <label htmlFor="crop-x" className="text-xs text-muted">
+                        Horizontal
+                      </label>
+                      <span className="text-[11px] tabular-nums text-gray-400">
+                        {Math.round(overrides.cropBox.x * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      id="crop-x"
+                      type="range"
+                      min={0}
+                      max={100}
+                      disabled={!canReposition}
+                      value={Math.round(overrides.cropBox.x * 100)}
+                      onChange={(event) =>
+                        updateOverrides({
+                          cropBox: { ...overrides.cropBox, x: Number(event.target.value) / 100 },
+                        })
+                      }
+                      className="w-full accent-accent disabled:cursor-not-allowed"
+                    />
+                    <div className="mt-1.5 flex gap-1.5">
+                      {[
+                        { label: "Esquerda", value: 0 },
+                        { label: "Centro", value: 0.5 },
+                        { label: "Direita", value: 1 },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          disabled={!canReposition}
+                          onClick={() =>
+                            updateOverrides({ cropBox: { ...overrides.cropBox, x: preset.value } })
+                          }
+                          className="flex-1 rounded-md border border-border bg-card py-1 text-[10px] text-gray-300 hover:bg-card-hover disabled:cursor-not-allowed disabled:hover:bg-card"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div className={canReposition ? undefined : "opacity-40"}>
+                    <div className="mb-1 flex items-center justify-between">
+                      <label htmlFor="crop-y" className="text-xs text-muted">
+                        Vertical
+                      </label>
+                      <span className="text-[11px] tabular-nums text-gray-400">
+                        {Math.round(overrides.cropBox.y * 100)}%
+                      </span>
+                    </div>
+                    <input
+                      id="crop-y"
+                      type="range"
+                      min={0}
+                      max={100}
+                      disabled={!canReposition}
+                      value={Math.round(overrides.cropBox.y * 100)}
+                      onChange={(event) =>
+                        updateOverrides({
+                          cropBox: { ...overrides.cropBox, y: Number(event.target.value) / 100 },
+                        })
+                      }
+                      className="w-full accent-accent disabled:cursor-not-allowed"
+                    />
+                    <div className="mt-1.5 flex gap-1.5">
+                      {[
+                        { label: "Topo", value: 0 },
+                        { label: "Centro", value: 0.5 },
+                        { label: "Base", value: 1 },
+                      ].map((preset) => (
+                        <button
+                          key={preset.label}
+                          type="button"
+                          disabled={!canReposition}
+                          onClick={() =>
+                            updateOverrides({ cropBox: { ...overrides.cropBox, y: preset.value } })
+                          }
+                          className="flex-1 rounded-md border border-border bg-card py-1 text-[10px] text-gray-300 hover:bg-card-hover disabled:cursor-not-allowed disabled:hover:bg-card"
+                        >
+                          {preset.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
               </div>
