@@ -109,6 +109,7 @@ export function EditDrawer({
                   contentCropZoom={overrides.cropZoom}
                   contentFit={overrides.fit}
                   contentRotation={overrides.rotation}
+                  onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
                   watermarkPosition={overrides.watermarkPosition}
                   onWatermarkPositionChange={(watermarkPosition) => updateOverrides({ watermarkPosition })}
                 />
@@ -121,6 +122,7 @@ export function EditDrawer({
                   contentCropZoom={overrides.cropZoom}
                   contentFit={overrides.fit}
                   contentRotation={overrides.rotation}
+                  onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
                   reactionMediaUrl={
                     profile.engine === "REACT"
                       ? (profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.url ??

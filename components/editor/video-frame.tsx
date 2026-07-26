@@ -1,8 +1,13 @@
+import { useState } from "react";
 import { BadgeCheck, User } from "lucide-react";
 import type { CropBox, FitMode, Profile, Rotation, WatermarkPosition } from "@/lib/editor/types";
 
 const CONTENT_GRADIENT = "bg-gradient-to-br from-neutral-700 to-neutral-900";
 const DEFAULT_CROP: CropBox = { x: 0.5, y: 0.5 };
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
 
 function VideoThumbnail({
   url,
@@ -11,6 +16,7 @@ function VideoThumbnail({
   cropZoom = 1,
   fit = "cover",
   rotation = 0,
+  onDragPosition,
 }: {
   url: string | null;
   className: string;
@@ -20,14 +26,49 @@ function VideoThumbnail({
   cropZoom?: number;
   fit?: FitMode;
   rotation?: Rotation;
+  /** Quando presente, arrastar sobre o vídeo reposiciona o recorte ao vivo — mais direto
+   *  que digitar em sliders pra alinhar o conteúdo. */
+  onDragPosition?: (next: CropBox) => void;
 }) {
+  const [dragging, setDragging] = useState(false);
+
+  function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    if (!onDragPosition) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setDragging(true);
+  }
+
+  function handlePointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    if (!dragging || !onDragPosition || !cropBox) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    // Arrastar "empurra" o conteúdo, então a janela de recorte anda pro lado oposto do
+    // gesto — igual segurar e mover uma foto. Divide pelo zoom porque, quanto mais
+    // ampliado, menos o recorte precisa andar pro mesmo deslocamento de tela.
+    const dxFraction = event.movementX / rect.width / cropZoom;
+    const dyFraction = event.movementY / rect.height / cropZoom;
+    onDragPosition({
+      x: clamp(cropBox.x - dxFraction, 0, 1),
+      y: clamp(cropBox.y - dyFraction, 0, 1),
+    });
+  }
+
+  function handlePointerUp() {
+    setDragging(false);
+  }
+
   if (url) {
     return (
       // O zoom escala o <video> via transform — sem um wrapper com overflow-hidden do
       // tamanho exato da zona, o vídeo ampliado vaza para fora dela (ex.: conteúdo
       // cobrindo a faixa de reação acima). O clipping tem que ser por zona, não só no
       // frame externo.
-      <div className={`${className} overflow-hidden`}>
+      <div
+        className={`${className} overflow-hidden ${onDragPosition ? "cursor-grab touch-none active:cursor-grabbing" : ""}`}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+      >
         <video
           src={url}
           muted
@@ -45,6 +86,7 @@ function VideoThumbnail({
           style={{
             objectPosition: cropBox ? `${cropBox.x * 100}% ${cropBox.y * 100}%` : undefined,
             transform: `rotate(${rotation}deg) scale(${cropZoom})`,
+            pointerEvents: onDragPosition ? "none" : undefined,
           }}
         />
       </div>
@@ -63,6 +105,7 @@ export function VideoFrame({
   contentRotation = 0,
   reactionMediaUrl = null,
   watermarkPosition = null,
+  onContentPositionChange,
 }: {
   profile: Profile;
   caption: string;
@@ -76,6 +119,8 @@ export function VideoFrame({
   reactionMediaUrl?: string | null;
   /** Só relevante quando profile.engine === "UGC". Posição x/y é relativa (0 a 1). */
   watermarkPosition?: WatermarkPosition | null;
+  /** Presente só no editor manual — arrastar o conteúdo reposiciona o recorte ao vivo. */
+  onContentPositionChange?: (next: CropBox) => void;
 }) {
   return (
     <div
@@ -94,6 +139,7 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
+            onDragPosition={onContentPositionChange}
             className="absolute inset-x-0 bottom-0 top-[36%] z-0"
           />
         </>
@@ -130,6 +176,7 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
+            onDragPosition={onContentPositionChange}
             className="aspect-[9/13] w-full rounded-lg"
           />
           <p className="mt-1.5 line-clamp-2 w-full text-[8px] leading-snug text-gray-300">
@@ -146,6 +193,7 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
+            onDragPosition={onContentPositionChange}
             className="absolute inset-0"
           />
           <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-foreground">

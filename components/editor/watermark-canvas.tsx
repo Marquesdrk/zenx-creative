@@ -17,6 +17,7 @@ export function WatermarkCanvas({
   contentCropZoom,
   contentFit,
   contentRotation,
+  onContentPositionChange,
   watermarkPosition,
   onWatermarkPositionChange,
 }: {
@@ -27,6 +28,7 @@ export function WatermarkCanvas({
   contentCropZoom?: number;
   contentFit?: FitMode;
   contentRotation?: Rotation;
+  onContentPositionChange?: (next: CropBox) => void;
   /** Posição relativa (0 a 1). */
   watermarkPosition: WatermarkPosition;
   onWatermarkPositionChange: (position: WatermarkPosition) => void;
@@ -69,6 +71,7 @@ export function WatermarkCanvas({
         contentCropZoom={contentCropZoom}
         contentFit={contentFit}
         contentRotation={contentRotation}
+        onContentPositionChange={onContentPositionChange}
         watermarkPosition={null}
       />
       <div
