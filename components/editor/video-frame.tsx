@@ -28,6 +28,14 @@ function VideoThumbnail({
         muted
         playsInline
         preload="metadata"
+        // Sem isso o vídeo pausado mostra um frame preto até o usuário interagir — busca um
+        // instante adiante pra prévia já nascer com uma imagem real do conteúdo.
+        onLoadedMetadata={(event) => {
+          const video = event.currentTarget;
+          if (Number.isFinite(video.duration)) {
+            video.currentTime = Math.min(0.1, video.duration / 2);
+          }
+        }}
         className={`${className} ${fit === "cover" ? "object-cover" : "object-contain"}`}
         style={{
           objectPosition: cropBox ? `${cropBox.x * 100}% ${cropBox.y * 100}%` : undefined,
