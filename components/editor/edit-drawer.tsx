@@ -3,11 +3,25 @@
 import { useEffect, useRef, useState } from "react";
 import { RotateCcw, Volume2, VolumeX, X } from "lucide-react";
 import { analyzeVideoSource } from "@/lib/editor/source-analysis";
+import { CropEditor } from "./crop-editor";
 import { VideoFrame } from "./video-frame";
 import { WatermarkCanvas } from "./watermark-canvas";
-import type { BatchItem, Profile, Rotation } from "@/lib/editor/types";
+import type { BatchItem, Engine, Profile, Rotation } from "@/lib/editor/types";
 
 const ROTATIONS: Rotation[] = [0, 90, 180, 270];
+const OUTPUT_WIDTH = 1080;
+const OUTPUT_HEIGHT = 1920;
+const REACT_REACTION_HEIGHT_RATIO = 0.36;
+
+/** Mesma proporção usada pelo render real (lib/server/render.ts) por engine — o editor
+ *  visual de recorte precisa mirar exatamente nisso, não em qualquer aspecto genérico. */
+function contentTargetAspect(engine: Engine): number {
+  if (engine === "REACT") {
+    const topHeight = Math.round(OUTPUT_HEIGHT * REACT_REACTION_HEIGHT_RATIO);
+    return OUTPUT_WIDTH / (OUTPUT_HEIGHT - topHeight);
+  }
+  return OUTPUT_WIDTH / OUTPUT_HEIGHT;
+}
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60);
@@ -36,9 +50,6 @@ export function EditDrawer({
   const [redetecting, setRedetecting] = useState(false);
   const trimVideoRef = useRef<HTMLVideoElement>(null);
   const overrides = draft.manualOverrides;
-  // Em zoom 1x o recorte cobre o quadro inteiro (sem sobra) — mover a posição não tem
-  // nenhum efeito visível até dar zoom, então os controles ficam desabilitados até lá.
-  const canReposition = overrides.cropZoom > 1.001;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -263,121 +274,25 @@ export function EditDrawer({
               )}
 
               <div>
-                <SectionLabel>Posição do conteúdo</SectionLabel>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="col-span-2">
-                    <div className="mb-1 flex items-center justify-between">
-                      <label htmlFor="crop-zoom" className="text-xs text-muted">
-                        Zoom (recorte livre)
-                      </label>
-                      <span className="text-[11px] tabular-nums text-gray-400">
-                        {overrides.cropZoom.toFixed(1)}×
-                      </span>
-                    </div>
-                    <input
-                      id="crop-zoom"
-                      type="range"
-                      min={1}
-                      max={3}
-                      step={0.1}
-                      value={overrides.cropZoom}
-                      onChange={(event) => updateOverrides({ cropZoom: Number(event.target.value) })}
-                      className="w-full accent-accent"
-                    />
-                    {!canReposition && (
-                      <p className="mt-1 text-[11px] text-amber-400">
-                        Em 1.0× o vídeo já preenche o quadro todo — não há para onde mover. Aumente o
-                        zoom para liberar Horizontal/Vertical abaixo.
-                      </p>
-                    )}
-                  </div>
-                  <div className={canReposition ? undefined : "opacity-40"}>
-                    <div className="mb-1 flex items-center justify-between">
-                      <label htmlFor="crop-x" className="text-xs text-muted">
-                        Horizontal
-                      </label>
-                      <span className="text-[11px] tabular-nums text-gray-400">
-                        {Math.round(overrides.cropBox.x * 100)}%
-                      </span>
-                    </div>
-                    <input
-                      id="crop-x"
-                      type="range"
-                      min={0}
-                      max={100}
-                      disabled={!canReposition}
-                      value={Math.round(overrides.cropBox.x * 100)}
-                      onChange={(event) =>
-                        updateOverrides({
-                          cropBox: { ...overrides.cropBox, x: Number(event.target.value) / 100 },
-                        })
-                      }
-                      className="w-full accent-accent disabled:cursor-not-allowed"
-                    />
-                    <div className="mt-1.5 flex gap-1.5">
-                      {[
-                        { label: "Esquerda", value: 0 },
-                        { label: "Centro", value: 0.5 },
-                        { label: "Direita", value: 1 },
-                      ].map((preset) => (
-                        <button
-                          key={preset.label}
-                          type="button"
-                          disabled={!canReposition}
-                          onClick={() =>
-                            updateOverrides({ cropBox: { ...overrides.cropBox, x: preset.value } })
-                          }
-                          className="flex-1 rounded-md border border-border bg-card py-1 text-[10px] text-gray-300 hover:bg-card-hover disabled:cursor-not-allowed disabled:hover:bg-card"
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className={canReposition ? undefined : "opacity-40"}>
-                    <div className="mb-1 flex items-center justify-between">
-                      <label htmlFor="crop-y" className="text-xs text-muted">
-                        Vertical
-                      </label>
-                      <span className="text-[11px] tabular-nums text-gray-400">
-                        {Math.round(overrides.cropBox.y * 100)}%
-                      </span>
-                    </div>
-                    <input
-                      id="crop-y"
-                      type="range"
-                      min={0}
-                      max={100}
-                      disabled={!canReposition}
-                      value={Math.round(overrides.cropBox.y * 100)}
-                      onChange={(event) =>
-                        updateOverrides({
-                          cropBox: { ...overrides.cropBox, y: Number(event.target.value) / 100 },
-                        })
-                      }
-                      className="w-full accent-accent disabled:cursor-not-allowed"
-                    />
-                    <div className="mt-1.5 flex gap-1.5">
-                      {[
-                        { label: "Topo", value: 0 },
-                        { label: "Centro", value: 0.5 },
-                        { label: "Base", value: 1 },
-                      ].map((preset) => (
-                        <button
-                          key={preset.label}
-                          type="button"
-                          disabled={!canReposition}
-                          onClick={() =>
-                            updateOverrides({ cropBox: { ...overrides.cropBox, y: preset.value } })
-                          }
-                          className="flex-1 rounded-md border border-border bg-card py-1 text-[10px] text-gray-300 hover:bg-card-hover disabled:cursor-not-allowed disabled:hover:bg-card"
-                        >
-                          {preset.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
+                <div className="mb-2 flex items-center justify-between">
+                  <SectionLabel>Recorte</SectionLabel>
+                  <span className="text-[11px] tabular-nums text-gray-400">
+                    {overrides.cropZoom.toFixed(1)}×
+                  </span>
                 </div>
+                <p className="mb-2 -mt-1 text-[11px] text-muted">
+                  Arraste o quadro pra reposicionar, puxe o canto pra recortar mais ou menos.
+                </p>
+                <CropEditor
+                  contentUrl={draft.contentUrl}
+                  sourceWidth={draft.sourceAnalysis?.width || OUTPUT_WIDTH}
+                  sourceHeight={draft.sourceAnalysis?.height || OUTPUT_HEIGHT}
+                  rotation={overrides.rotation}
+                  targetAspect={contentTargetAspect(profile.engine)}
+                  cropBox={overrides.cropBox}
+                  cropZoom={overrides.cropZoom}
+                  onChange={({ cropBox, zoom }) => updateOverrides({ cropBox, cropZoom: zoom })}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-4">

@@ -5,6 +5,7 @@ import ffmpeg from "fluent-ffmpeg";
 import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
+import { computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
 import type { BatchItem, CropBox, Profile } from "@/lib/editor/types";
 
 if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic);
@@ -18,10 +19,6 @@ function publicUrlToPath(url: string): string {
   return path.join(process.cwd(), "public", url.replace(/^\//, ""));
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
 const ROTATE_FILTERS: Record<number, string[]> = {
   0: [],
   90: ["transpose=1"],
@@ -29,35 +26,18 @@ const ROTATE_FILTERS: Record<number, string[]> = {
   270: ["transpose=2"],
 };
 
-function effectiveDimensions(width: number, height: number, rotation: number) {
-  return rotation === 90 || rotation === 270 ? { width: height, height: width } : { width, height };
-}
-
-/** Recorte "cover": mantém o aspect ratio alvo, corta o excedente ao redor do centro
- *  escolhido (cropBox), sem nunca esticar a imagem. Zoom > 1 aperta a janela de recorte. */
+/** Recorte "cover": mesmo cálculo usado pelo editor visual (components/editor/crop-editor.tsx)
+ *  via lib/editor/crop-geometry.ts — prévia e vídeo final nunca divergem. */
 function buildCropFilter(
-  srcWidth: number,
-  srcHeight: number,
+  effWidth: number,
+  effHeight: number,
   cropBox: CropBox,
   zoom: number,
   targetWidth: number,
   targetHeight: number
 ): string {
-  const targetAspect = targetWidth / targetHeight;
-  let cropWidth: number;
-  let cropHeight: number;
-  if (srcWidth / srcHeight > targetAspect) {
-    cropHeight = srcHeight / zoom;
-    cropWidth = cropHeight * targetAspect;
-  } else {
-    cropWidth = srcWidth / zoom;
-    cropHeight = cropWidth / targetAspect;
-  }
-  cropWidth = Math.min(cropWidth, srcWidth);
-  cropHeight = Math.min(cropHeight, srcHeight);
-  const x = clamp(cropBox.x * srcWidth - cropWidth / 2, 0, srcWidth - cropWidth);
-  const y = clamp(cropBox.y * srcHeight - cropHeight / 2, 0, srcHeight - cropHeight);
-  return `crop=${Math.round(cropWidth)}:${Math.round(cropHeight)}:${Math.round(x)}:${Math.round(y)}`;
+  const rect = computeCropRect(effWidth, effHeight, cropBox, zoom, targetWidth / targetHeight);
+  return `crop=${Math.round(rect.width)}:${Math.round(rect.height)}:${Math.round(rect.x)}:${Math.round(rect.y)}`;
 }
 
 /** Consulta a resolução real do arquivo via ffprobe — nunca confia só na análise feita no
