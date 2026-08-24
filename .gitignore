@@ -9,6 +9,7 @@ node_modules/
 /data/
 /public/uploads/
 /public/renders/
+/public/batch-space/
 .vercel
 .claude/settings.local.json
 /_to_delete/

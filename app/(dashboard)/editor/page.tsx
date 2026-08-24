@@ -165,9 +165,14 @@ export default function EditorPage() {
     const res = await fetch(`/api/batches/${batchId}/export`, { method: "POST" });
     setExportingBatchId(null);
     if (!res.ok) return;
-    const data = (await res.json()) as { batch?: Batch };
-    if (data.batch) {
-      setBatches((current) => current.map((batch) => (batch.id === data.batch!.id ? data.batch! : batch)));
+    const data = (await res.json()) as { files?: Array<{ url: string; filename: string }> };
+    for (const file of data.files ?? []) {
+      const link = document.createElement("a");
+      link.href = file.url;
+      link.download = file.filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
     }
   }
 
@@ -222,8 +227,8 @@ export default function EditorPage() {
         legenda automaticamente.
       </p>
       <p className="mb-8 mt-1 text-xs text-muted">
-        Ao confirmar um lote, os vídeos são renderizados de verdade (ffmpeg) e, se o Google Drive
-        estiver conectado, enviados para a pasta &quot;Vídeos para postar&quot;.
+        Ao confirmar um lote, os vídeos são renderizados de verdade (ffmpeg). Ao exportar, eles
+        são baixados localmente no seu dispositivo, sem criar espaço interno ou enviar para nuvem.
       </p>
 
       <div className="mb-6 grid grid-cols-3 gap-4">

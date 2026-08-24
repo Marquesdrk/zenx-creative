@@ -50,13 +50,7 @@ export function VideoGrid({
                 <p className="mt-0.5 text-xs text-muted">
                   {ENGINE_LABELS[batch.engine]} · {batchItems.length} vídeo(s) ·{" "}
                   {batchItems.filter((item) => item.status === "COMPLETED").length} renderizado(s)
-                  {batch.storageProvider ? ` · exportado em ${batch.storageProvider}` : ""}
                 </p>
-                {batch.exportPath && (
-                  <p className="mt-1 truncate text-[11px] text-accent">
-                    Espaço interno: {batch.storageUrl ?? batch.exportPath}
-                  </p>
-                )}
               </div>
               <div className="flex flex-wrap gap-2">
                 {canConfirm && (
