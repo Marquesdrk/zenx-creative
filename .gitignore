@@ -9,3 +9,6 @@ node_modules/
 /data/
 /public/uploads/
 /public/renders/
+.vercel
+.claude/settings.local.json
+/_to_delete/

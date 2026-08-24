@@ -1,6 +1,16 @@
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { BadgeCheck, User } from "lucide-react";
-import type { CropBox, FitMode, Profile, Rotation, WatermarkPosition } from "@/lib/editor/types";
+import {
+  DEFAULT_X_STYLE_LAYOUT,
+  resolveXStyleLayout,
+  type CropBox,
+  type FitMode,
+  type Profile,
+  type Rotation,
+  type WatermarkPosition,
+  type XStyleVideoFrame,
+} from "@/lib/editor/types";
 
 const CONTENT_GRADIENT = "bg-gradient-to-br from-neutral-700 to-neutral-900";
 const DEFAULT_CROP: CropBox = { x: 0.5, y: 0.5 };
@@ -17,9 +27,11 @@ function VideoThumbnail({
   fit = "cover",
   rotation = 0,
   onDragPosition,
+  style,
 }: {
   url: string | null;
   className: string;
+  style?: CSSProperties;
   /** Recorte relativo (0 a 1) aplicado via object-position — nunca estica o vídeo. */
   cropBox?: CropBox;
   /** Zoom sobre o recorte (1 = sem zoom), combinado com cropBox para um "recorte livre". */
@@ -68,6 +80,7 @@ function VideoThumbnail({
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerUp}
+        style={style}
       >
         <video
           src={url}
@@ -92,11 +105,12 @@ function VideoThumbnail({
       </div>
     );
   }
-  return <div className={`${className} ${CONTENT_GRADIENT}`} />;
+  return <div className={`${className} ${CONTENT_GRADIENT}`} style={style} />;
 }
 
 export function VideoFrame({
   profile,
+  title,
   caption,
   contentUrl = null,
   contentCropBox = DEFAULT_CROP,
@@ -105,9 +119,11 @@ export function VideoFrame({
   contentRotation = 0,
   reactionMediaUrl = null,
   watermarkPosition = null,
+  xStyleVideoFrame = null,
   onContentPositionChange,
 }: {
   profile: Profile;
+  title?: string;
   caption: string;
   contentUrl?: string | null;
   /** Recorte do conteúdo importado (não da mídia de reação nem da marca d'água). */
@@ -119,9 +135,14 @@ export function VideoFrame({
   reactionMediaUrl?: string | null;
   /** Só relevante quando profile.engine === "UGC". Posição x/y é relativa (0 a 1). */
   watermarkPosition?: WatermarkPosition | null;
+  /** Só relevante quando profile.engine === "X_STYLE". Medidas no canvas 1080x1920. */
+  xStyleVideoFrame?: XStyleVideoFrame | null;
   /** Presente só no editor manual — arrastar o conteúdo reposiciona o recorte ao vivo. */
   onContentPositionChange?: (next: CropBox) => void;
 }) {
+  const xStyleLayout = profile.engine === "X_STYLE" ? resolveXStyleLayout(profile.xStyleLayout) : DEFAULT_X_STYLE_LAYOUT;
+  const xStyleVideo = xStyleVideoFrame ?? xStyleLayout.video;
+
   return (
     <div
       data-testid="video-frame"
@@ -146,30 +167,29 @@ export function VideoFrame({
       )}
 
       {profile.engine === "X_STYLE" && (
-        <div className="flex h-full flex-col items-center bg-black px-2.5 pt-2.5">
-          <div className="mb-2 flex w-full items-center gap-1.5">
-            {profile.avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element -- object URL, not an optimizable static asset
-              <img
-                src={profile.avatarUrl}
-                alt=""
-                className="h-5 w-5 shrink-0 rounded-full object-cover"
-              />
-            ) : (
-              <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-700">
-                <User size={11} className="text-neutral-400" />
+        <div className="absolute inset-0 bg-white [container-type:inline-size]">
+          {profile.backgroundImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element -- template artwork served from /public
+            <img src={profile.backgroundImageUrl} alt="" className="absolute inset-0 h-full w-full object-cover" />
+          ) : (
+            <div className="absolute left-[10%] top-[7%] flex items-center gap-[3%] text-black">
+              {profile.avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element -- object URL, not an optimizable static asset
+                <img src={profile.avatarUrl} alt="" className="h-9 w-9 shrink-0 rounded-full object-cover" />
+              ) : (
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-neutral-100">
+                  <User size={16} className="text-neutral-500" />
+                </div>
+              )}
+              <div className="min-w-0">
+                <div className="flex items-center gap-1">
+                  <span className="truncate text-[17px] text-black">{profile.name}</span>
+                  {profile.verified && <BadgeCheck size={16} className="shrink-0 text-accent" fill="currentColor" />}
+                </div>
+                <div className="truncate text-[12px] text-neutral-700">{profile.handle}</div>
               </div>
-            )}
-            <div className="min-w-0">
-              <div className="flex items-center gap-0.5">
-                <span className="truncate text-[9px] font-bold text-foreground">{profile.name}</span>
-                {profile.verified && (
-                  <BadgeCheck size={9} className="shrink-0 text-accent" fill="currentColor" />
-                )}
-              </div>
-              <div className="truncate text-[8px] text-gray-500">{profile.handle}</div>
             </div>
-          </div>
+          )}
           <VideoThumbnail
             url={contentUrl}
             cropBox={contentCropBox}
@@ -177,9 +197,34 @@ export function VideoFrame({
             fit={contentFit}
             rotation={contentRotation}
             onDragPosition={onContentPositionChange}
-            className="aspect-[9/13] w-full rounded-lg"
+            className="absolute bg-black"
+            style={{
+              left: `${(xStyleVideo.x / 1080) * 100}%`,
+              top: `${(xStyleVideo.y / 1920) * 100}%`,
+              width: `${(xStyleVideo.width / 1080) * 100}%`,
+              height: `${(xStyleVideo.height / 1920) * 100}%`,
+            }}
           />
-          <p className="mt-1.5 line-clamp-2 w-full text-[8px] leading-snug text-gray-300">
+          <p
+            className="absolute line-clamp-2 text-left font-semibold leading-tight text-black [overflow-wrap:anywhere]"
+            style={{
+              left: `${(xStyleLayout.title.x / 1080) * 100}%`,
+              top: `${(xStyleLayout.title.y / 1920) * 100}%`,
+              width: `${(xStyleLayout.title.maxWidth / 1080) * 100}%`,
+              fontSize: `${(xStyleLayout.title.fontSize / 1080) * 100}cqw`,
+            }}
+          >
+            {title || profile.defaultTitle || "Titulo do video"}
+          </p>
+          <p
+            className="absolute line-clamp-4 text-left font-bold leading-snug text-neutral-950"
+            style={{
+              left: `${(xStyleLayout.body.x / 1080) * 100}%`,
+              top: `${(xStyleLayout.body.y / 1920) * 100}%`,
+              width: `${(xStyleLayout.body.maxWidth / 1080) * 100}%`,
+              fontSize: `${(xStyleLayout.body.fontSize / 1080) * 100}cqw`,
+            }}
+          >
             {caption}
           </p>
         </div>

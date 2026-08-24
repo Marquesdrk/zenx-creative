@@ -6,7 +6,14 @@ import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { CropEditor } from "./crop-editor";
 import { VideoFrame } from "./video-frame";
 import { WatermarkCanvas } from "./watermark-canvas";
-import type { BatchItem, Engine, Profile, Rotation } from "@/lib/editor/types";
+import {
+  resolveXStyleLayout,
+  type BatchItem,
+  type Engine,
+  type Profile,
+  type Rotation,
+  type XStyleVideoFrame,
+} from "@/lib/editor/types";
 
 const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 const OUTPUT_WIDTH = 1080;
@@ -15,10 +22,14 @@ const REACT_REACTION_HEIGHT_RATIO = 0.36;
 
 /** Mesma proporção usada pelo render real (lib/server/render.ts) por engine — o editor
  *  visual de recorte precisa mirar exatamente nisso, não em qualquer aspecto genérico. */
-function contentTargetAspect(engine: Engine): number {
+function contentTargetAspect(engine: Engine, xStyleVideoFrame?: XStyleVideoFrame | null): number {
   if (engine === "REACT") {
     const topHeight = Math.round(OUTPUT_HEIGHT * REACT_REACTION_HEIGHT_RATIO);
     return OUTPUT_WIDTH / (OUTPUT_HEIGHT - topHeight);
+  }
+  if (engine === "X_STYLE") {
+    const frame = xStyleVideoFrame ?? resolveXStyleLayout().video;
+    return frame.width / frame.height;
   }
   return OUTPUT_WIDTH / OUTPUT_HEIGHT;
 }
@@ -71,6 +82,23 @@ export function EditDrawer({
       ...current,
       manualOverrides: { ...current.manualOverrides, ...patch },
     }));
+  }
+
+  const defaultXStyleVideoFrame =
+    profile.engine === "X_STYLE" ? resolveXStyleLayout(profile.xStyleLayout).video : null;
+  const xStyleVideoFrame = overrides.xStyleVideoFrame ?? defaultXStyleVideoFrame;
+
+  function updateXStyleVideoFrame(patch: Partial<XStyleVideoFrame>) {
+    if (!xStyleVideoFrame) return;
+    const next = {
+      ...xStyleVideoFrame,
+      ...patch,
+    };
+    next.width = Math.round(Math.min(980, Math.max(240, next.width)));
+    next.height = Math.round(Math.min(1300, Math.max(180, next.height)));
+    next.x = Math.round(Math.min(1080 - next.width, Math.max(0, next.x)));
+    next.y = Math.round(Math.min(1920 - next.height, Math.max(0, next.y)));
+    updateOverrides({ xStyleVideoFrame: next });
   }
 
   async function handleRedetect() {
@@ -127,12 +155,14 @@ export function EditDrawer({
               ) : (
                 <VideoFrame
                   profile={profile}
+                  title={overrides.title}
                   caption={overrides.caption}
                   contentUrl={draft.contentUrl}
                   contentCropBox={overrides.cropBox}
                   contentCropZoom={overrides.cropZoom}
                   contentFit={overrides.fit}
                   contentRotation={overrides.rotation}
+                  xStyleVideoFrame={overrides.xStyleVideoFrame}
                   onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
                   reactionMediaUrl={
                     profile.engine === "REACT"
@@ -259,15 +289,68 @@ export function EditDrawer({
                 </div>
               )}
 
+              {profile.engine === "X_STYLE" && (
+                <div>
+                  <SectionLabel>Título</SectionLabel>
+                  <input
+                    id="title"
+                    aria-label="Título"
+                    value={overrides.title ?? profile.defaultTitle ?? ""}
+                    onChange={(event) => updateOverrides({ title: event.target.value })}
+                    className="w-full rounded-lg border border-border bg-card p-2 text-sm text-foreground"
+                  />
+                </div>
+              )}
+
+              {profile.engine === "X_STYLE" && xStyleVideoFrame && defaultXStyleVideoFrame && (
+                <div>
+                  <div className="mb-2 flex items-center justify-between">
+                    <SectionLabel>Área do vídeo no template</SectionLabel>
+                    <button
+                      type="button"
+                      onClick={() => updateOverrides({ xStyleVideoFrame: null })}
+                      className="text-[11px] font-semibold text-accent"
+                    >
+                      Usar automático
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    {([
+                      ["x", "X", 0, 1080 - xStyleVideoFrame.width],
+                      ["y", "Y", 0, 1920 - xStyleVideoFrame.height],
+                      ["width", "Largura", 240, 980],
+                      ["height", "Altura", 180, 1300],
+                    ] as const).map(([key, label, min, max]) => (
+                      <label key={key} className="rounded-lg border border-border bg-card p-3">
+                        <span className="mb-2 flex items-center justify-between text-xs font-semibold text-muted">
+                          {label}
+                          <span className="tabular-nums text-gray-300">{xStyleVideoFrame[key]}px</span>
+                        </span>
+                        <input
+                          type="range"
+                          min={min}
+                          max={Math.max(min, max)}
+                          step={4}
+                          value={xStyleVideoFrame[key]}
+                          onChange={(event) => updateXStyleVideoFrame({ [key]: Number(event.target.value) })}
+                          className="w-full accent-accent"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {profile.engine !== "REACT" && (
                 <div>
-                  <SectionLabel>Legenda</SectionLabel>
+                  <SectionLabel>{profile.engine === "X_STYLE" ? "Texto abaixo do vídeo" : "Legenda"}</SectionLabel>
                   <textarea
                     id="caption"
-                    aria-label="Legenda"
+                    aria-label={profile.engine === "X_STYLE" ? "Texto abaixo do vídeo" : "Legenda"}
                     value={overrides.caption}
+                    placeholder={profile.engine === "X_STYLE" ? "Ex.: Link na bio" : undefined}
                     onChange={(event) => updateOverrides({ caption: event.target.value })}
-                    rows={3}
+                    rows={profile.engine === "X_STYLE" ? 2 : 3}
                     className="w-full rounded-lg border border-border bg-card p-2 text-sm text-foreground"
                   />
                 </div>
@@ -288,7 +371,7 @@ export function EditDrawer({
                   sourceWidth={draft.sourceAnalysis?.width || OUTPUT_WIDTH}
                   sourceHeight={draft.sourceAnalysis?.height || OUTPUT_HEIGHT}
                   rotation={overrides.rotation}
-                  targetAspect={contentTargetAspect(profile.engine)}
+                  targetAspect={contentTargetAspect(profile.engine, xStyleVideoFrame)}
                   cropBox={overrides.cropBox}
                   cropZoom={overrides.cropZoom}
                   onChange={({ cropBox, zoom }) => updateOverrides({ cropBox, cropZoom: zoom })}

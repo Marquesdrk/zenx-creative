@@ -1,4 +1,4 @@
-import type { Profile } from "./types";
+import { DEFAULT_X_STYLE_LAYOUT, type Profile } from "./types";
 
 export const MOCK_PROFILES: Profile[] = [
   {
@@ -24,6 +24,45 @@ export const MOCK_PROFILES: Profile[] = [
     engine: "UGC",
     templateId: "t3",
     watermarkImageUrl: null,
+  },
+  {
+    id: "p-x-garimpo-tech",
+    name: "Garimpo Tech",
+    engine: "X_STYLE",
+    templateId: "t-x-garimpo-tech",
+    handle: "@garimpodigitaltech",
+    avatarUrl: null,
+    verified: true,
+    editorialTone: "Tom tech, direto e comercial",
+    backgroundImageUrl: "/templates/garimpo-tech.png",
+    defaultTitle: "Oferta em destaque",
+    xStyleLayout: DEFAULT_X_STYLE_LAYOUT,
+  },
+  {
+    id: "p-x-boo-shoops",
+    name: "Boo Shoops",
+    engine: "X_STYLE",
+    templateId: "t-x-boo-shoops",
+    handle: "@booshoops",
+    avatarUrl: null,
+    verified: true,
+    editorialTone: "Tom leve, familiar e voltado para presentes infantis",
+    backgroundImageUrl: "/templates/boo-shoops.png",
+    defaultTitle: "Achadinho fofo",
+    xStyleLayout: DEFAULT_X_STYLE_LAYOUT,
+  },
+  {
+    id: "p-x-utilidades-ffy",
+    name: "Utilidades ffy",
+    engine: "X_STYLE",
+    templateId: "t-x-utilidades-ffy",
+    handle: "@utilidadesffy",
+    avatarUrl: null,
+    verified: true,
+    editorialTone: "Tom casa, utilidades e compra inteligente",
+    backgroundImageUrl: "/templates/utilidades-ffy.png",
+    defaultTitle: "Utilidade do dia",
+    xStyleLayout: DEFAULT_X_STYLE_LAYOUT,
   },
 ];
 

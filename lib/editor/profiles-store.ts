@@ -1,7 +1,7 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import type { Engine, Profile } from "./types";
+import { DEFAULT_X_STYLE_LAYOUT, type Engine, type Profile } from "./types";
 
 let cache: Profile[] | null = null;
 let hydrating: Promise<void> | null = null;
@@ -88,6 +88,9 @@ export function createBlankProfile(engine: Engine, templateId: string): Profile 
         avatarUrl: null,
         verified: false,
         editorialTone: "Tom neutro",
+        backgroundImageUrl: null,
+        defaultTitle: "Título do vídeo",
+        xStyleLayout: DEFAULT_X_STYLE_LAYOUT,
       };
     case "UGC":
       return {

@@ -160,7 +160,11 @@ export function BatchModal({
               <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
                 Prévia — {ENGINE_LABELS[selectedProfile.engine]}
               </p>
-              <VideoFrame profile={selectedProfile} caption="Legenda de exemplo" />
+              <VideoFrame
+                profile={selectedProfile}
+                title={selectedProfile.engine === "X_STYLE" ? selectedProfile.defaultTitle : undefined}
+                caption="Legenda de exemplo"
+              />
             </div>
           )}
         </div>

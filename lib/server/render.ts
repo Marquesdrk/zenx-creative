@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
-import type { BatchItem, CropBox, Profile } from "@/lib/editor/types";
+import { resolveXStyleLayout, type BatchItem, type CropBox, type Profile } from "@/lib/editor/types";
 
 if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic);
 ffmpeg.setFfprobePath((ffprobeStatic as { path: string }).path);
@@ -14,6 +14,7 @@ ffmpeg.setFfprobePath((ffprobeStatic as { path: string }).path);
 const OUTPUT_WIDTH = 1080;
 const OUTPUT_HEIGHT = 1920;
 const RENDER_DIR = path.join(process.cwd(), "public", "renders");
+const FONT_FILE = "C\\:/Windows/Fonts/arial.ttf";
 
 function publicUrlToPath(url: string): string {
   return path.join(process.cwd(), "public", url.replace(/^\//, ""));
@@ -196,14 +197,135 @@ async function renderReact(
   );
 }
 
+function escapeDrawtextText(text: string): string {
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/:/g, "\\:")
+    .replace(/,/g, "\\,")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]");
+}
+
+function wrapText(text: string, maxChars: number, maxLines: number): string[] {
+  let remaining = text.replace(/\s+/g, " ").trim();
+  if (!remaining) return [];
+  const lines: string[] = [];
+  const preferredMinimum = Math.floor(maxChars * 0.6);
+
+  while (remaining && lines.length < maxLines) {
+    if (remaining.length <= maxChars) {
+      lines.push(remaining);
+      remaining = "";
+      break;
+    }
+
+    const window = remaining.slice(0, maxChars + 1);
+    let breakAt = window.lastIndexOf(" ");
+    if (breakAt < preferredMinimum) breakAt = maxChars;
+
+    lines.push(remaining.slice(0, breakAt).trimEnd());
+    remaining = remaining.slice(breakAt).trimStart();
+  }
+
+  if (remaining && lines.length === maxLines) {
+    lines[maxLines - 1] = `${lines[maxLines - 1].replace(/\s*\.{3}$/, "").slice(0, Math.max(1, maxChars - 3))}...`;
+  }
+  return lines;
+}
+
+function drawLeftTextFilters(
+  inputLabel: string,
+  outputLabel: string,
+  text: string,
+  options: {
+    x: number;
+    y: number;
+    fontSize: number;
+    maxWidth: number;
+    maxLines: number;
+    lineHeight: number;
+    weight?: "bold";
+  }
+): string[] {
+  const maxChars = Math.max(10, Math.floor(options.maxWidth / (options.fontSize * 0.52)));
+  const lines = wrapText(text, maxChars, options.maxLines);
+  if (lines.length === 0) return [`[${inputLabel}]copy[${outputLabel}]`];
+
+  const filters: string[] = [];
+  let current = inputLabel;
+  lines.forEach((line, index) => {
+    const next = index === lines.length - 1 ? outputLabel : `${outputLabel}${index}`;
+    const y = options.y + index * options.lineHeight;
+    const border = options.weight === "bold" ? ":borderw=0" : "";
+    filters.push(
+      `[${current}]drawtext=fontfile='${FONT_FILE}':text='${escapeDrawtextText(line)}':` +
+        `fontcolor=black:fontsize=${options.fontSize}${border}:x=${options.x}:y=${y}[${next}]`
+    );
+    current = next;
+  });
+  return filters;
+}
+
+async function renderXStyle(
+  item: BatchItem,
+  profile: Profile,
+  source: { width: number; height: number },
+  contentPath: string,
+  outputPath: string
+) {
+  if (profile.engine !== "X_STYLE") throw new Error("Perfil não é X_STYLE");
+  const backgroundPath = profile.backgroundImageUrl ? publicUrlToPath(profile.backgroundImageUrl) : null;
+  if (!backgroundPath || !existsSync(backgroundPath)) {
+    await renderTransformOnly(item, source, contentPath, outputPath);
+    return;
+  }
+
+  const layout = resolveXStyleLayout(profile.xStyleLayout);
+  const videoFrame = item.manualOverrides.xStyleVideoFrame ?? layout.video;
+  const contentFilters = buildContentFilters(item, source, videoFrame.width, videoFrame.height);
+  const title = item.manualOverrides.title || profile.defaultTitle || "";
+  const filterGraph = [
+    `[1:v]scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}[bg]`,
+    `[0:v]${contentFilters.join(",")}[content]`,
+    `[bg][content]overlay=x=${videoFrame.x}:y=${videoFrame.y}:shortest=1[xbase]`,
+    ...drawLeftTextFilters("xbase", "xtitle", title, {
+      x: layout.title.x,
+      y: layout.title.y,
+      fontSize: layout.title.fontSize,
+      maxWidth: layout.title.maxWidth,
+      maxLines: layout.title.maxLines,
+      lineHeight: Math.round(layout.title.fontSize * 1.12),
+      weight: "bold",
+    }),
+    ...drawLeftTextFilters("xtitle", "outv", item.manualOverrides.caption, {
+      x: layout.body.x,
+      y: layout.body.y,
+      fontSize: layout.body.fontSize,
+      maxWidth: layout.body.maxWidth,
+      maxLines: layout.body.maxLines,
+      lineHeight: Math.round(layout.body.fontSize * 1.25),
+      weight: "bold",
+    }),
+  ];
+  await run(
+    [
+      { path: contentPath, options: contentInputOptions(item) },
+      { path: backgroundPath, options: ["-loop", "1"] },
+    ],
+    filterGraph,
+    outputPath,
+    item
+  );
+}
+
 export type RenderOutcome = { renderedUrl: string } | { error: string };
 
 /**
  * Renderiza um BatchItem de verdade via ffmpeg: rotação/recorte/zoom/ajuste/corte/volume
  * universais, mais o composto específico de cada engine (UGC: overlay da marca d'água;
- * REACT: empilhamento vertical mídia de reação + conteúdo). X_STYLE ainda não compõe a
- * moldura de identidade (avatar/handle/legenda) no vídeo final — isso fica para uma
- * evolução futura do pipeline; a legenda em si já vai como metadado na publicação.
+ * REACT: empilhamento vertical mídia de reação + conteúdo; X_STYLE: arte pronta como fundo,
+ * título acima do conteúdo, vídeo centralizado e texto/CTA abaixo).
  */
 export async function renderBatchItem(item: BatchItem, profile: Profile): Promise<RenderOutcome> {
   if (!item.contentUrl) {
@@ -224,6 +346,8 @@ export async function renderBatchItem(item: BatchItem, profile: Profile): Promis
       await renderUgc(item, profile, source, contentPath, outputPath);
     } else if (profile.engine === "REACT") {
       await renderReact(item, profile, source, contentPath, outputPath);
+    } else if (profile.engine === "X_STYLE") {
+      await renderXStyle(item, profile, source, contentPath, outputPath);
     } else {
       await renderTransformOnly(item, source, contentPath, outputPath);
     }

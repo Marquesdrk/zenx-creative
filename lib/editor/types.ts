@@ -36,6 +36,12 @@ export type XStyleProfile = {
   verified: boolean;
   /** Tom editorial usado para reescrever a legenda original. */
   editorialTone: string;
+  /** Arte pronta do perfil, usada como fundo do vídeo X Style final. */
+  backgroundImageUrl?: string | null;
+  /** Texto inicial colocado como título acima do vídeo centralizado. */
+  defaultTitle?: string;
+  /** Layout relativo ao canvas 1080x1920 do template pronto. */
+  xStyleLayout?: XStyleLayout;
 };
 
 export type UgcProfile = {
@@ -50,6 +56,36 @@ export type UgcProfile = {
 /** Aponta para um template e armazena identidade, assets e configuração (Drive/conexões
  *  sociais chegam nas fases 6–7). */
 export type Profile = ReactProfile | XStyleProfile | UgcProfile;
+
+export type XStyleLayout = {
+  video: { x: number; y: number; width: number; height: number };
+  title: { x: number; y: number; fontSize: number; maxWidth: number; maxLines: number };
+  body: { x: number; y: number; fontSize: number; maxWidth: number; maxLines: number };
+};
+
+export type XStyleVideoFrame = XStyleLayout["video"];
+
+export const DEFAULT_X_STYLE_LAYOUT: XStyleLayout = {
+  title: { x: 70, y: 325, fontSize: 48, maxWidth: 940, maxLines: 2 },
+  video: { x: 70, y: 455, width: 940, height: 1120 },
+  body: { x: 120, y: 1615, fontSize: 34, maxWidth: 840, maxLines: 4 },
+};
+
+export function resolveXStyleLayout(
+  layout?:
+    | {
+        title?: Partial<XStyleLayout["title"]>;
+        video?: Partial<XStyleLayout["video"]>;
+        body?: Partial<XStyleLayout["body"]>;
+      }
+    | null
+): XStyleLayout {
+  return {
+    title: { ...DEFAULT_X_STYLE_LAYOUT.title, ...layout?.title },
+    video: { ...DEFAULT_X_STYLE_LAYOUT.video, ...layout?.video },
+    body: { ...DEFAULT_X_STYLE_LAYOUT.body, ...layout?.body },
+  };
+}
 
 /** Define posições, dimensões e comportamento visual — hoje só o essencial de cada engine já
  *  suportado pela UI; mais campos (fontes, cores, áudio) entram conforme forem implementados. */
@@ -90,11 +126,18 @@ export type Batch = {
   profileId: string;
   engine: Engine;
   createdAt: string;
+  exportPath?: string | null;
+  exportedAt?: string | null;
+  storageProvider?: "LOCAL" | "SUPABASE" | null;
+  storageUrl?: string | null;
 };
 
 /** Ajustes manuais do item, isolados do template global do perfil. */
 export type ManualOverrides = {
+  title?: string;
   caption: string;
+  /** Ajuste manual da janela de vídeo dentro do template X Style. Ausente = layout do perfil. */
+  xStyleVideoFrame?: XStyleVideoFrame | null;
   watermarkPosition: WatermarkPosition;
   cropBox: CropBox;
   /** Zoom aplicado sobre o recorte (1 = sem zoom), permitindo um "recorte livre" combinando
@@ -112,10 +155,13 @@ export type ManualOverrides = {
 };
 
 export function createDefaultManualOverrides(
-  params: Pick<ManualOverrides, "caption" | "watermarkPosition" | "reactionMediaId">
+  params: Pick<ManualOverrides, "caption" | "watermarkPosition" | "reactionMediaId"> & {
+    title?: string;
+  }
 ): ManualOverrides {
   return {
     ...params,
+    title: params.title ?? "",
     cropBox: { x: 0.5, y: 0.5 },
     cropZoom: 1,
     fit: "cover",
@@ -179,6 +225,7 @@ export type Publication = {
   batchItemId: string;
   platform: Platform;
   status: PublicationStatus;
+  scheduledAt: string | null;
   externalId: string | null;
   permalink: string | null;
   error: string | null;

@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
-import { CompletedItemsPanel } from "@/components/editor/completed-items-panel";
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
 import { useProfiles } from "@/lib/editor/profiles-store";
@@ -18,7 +17,7 @@ const ACTIVE_STATUSES = new Set(["IMPORTING", "ANALYZING", "PROCESSING"]);
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
   if (profile.engine === "X_STYLE") {
-    return `${profile.editorialTone} — legenda original de ${filename}, transcrita e reescrita mantendo o mesmo assunto.`;
+    return "";
   }
   return `Legenda gerada automaticamente a partir de ${filename}`;
 }
@@ -30,6 +29,7 @@ export default function EditorPage() {
   const [items, setItems] = useState<BatchItem[]>([]);
   const [isBatchModalOpen, setBatchModalOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
+  const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -101,6 +101,7 @@ export default function EditorPage() {
           contentUrl: u.contentUrl,
           status: u.contentUrl ? "ANALYZING" : "AWAITING_REVIEW",
           manualOverrides: createDefaultManualOverrides({
+            title: profile.engine === "X_STYLE" ? profile.defaultTitle : undefined,
             caption: generateCaption(u.filename, profile),
             watermarkPosition: { ...watermarkDefaults },
             reactionMediaId: u.reactionMediaId,
@@ -145,6 +146,31 @@ export default function EditorPage() {
     refresh();
   }
 
+  async function handleDeleteItem(item: BatchItem) {
+    if (!window.confirm(`Remover "${item.filename}" deste lote?`)) return;
+    setItems((current) => current.filter((candidate) => candidate.id !== item.id));
+    const res = await fetch(`/api/batch-items/${item.id}`, { method: "DELETE" });
+    if (!res.ok) {
+      await refresh();
+      return;
+    }
+    const data = (await res.json()) as { removedBatchId: string | null };
+    if (data.removedBatchId) {
+      setBatches((current) => current.filter((batch) => batch.id !== data.removedBatchId));
+    }
+  }
+
+  async function handleExportBatch(batchId: string) {
+    setExportingBatchId(batchId);
+    const res = await fetch(`/api/batches/${batchId}/export`, { method: "POST" });
+    setExportingBatchId(null);
+    if (!res.ok) return;
+    const data = (await res.json()) as { batch?: Batch };
+    if (data.batch) {
+      setBatches((current) => current.map((batch) => (batch.id === data.batch!.id ? data.batch! : batch)));
+    }
+  }
+
   async function handleSaveEdit(updated: BatchItem, applyToAll: boolean) {
     setEditingItemId(null);
     const targets = applyToAll ? items.filter((i) => i.batchId === updated.batchId) : [updated];
@@ -176,7 +202,6 @@ export default function EditorPage() {
     ? profiles.find((p) => p.id === editingBatch.profileId)
     : null;
 
-  const activeItems = items.filter((i) => i.status !== "COMPLETED");
   const completedItems = items.filter((i) => i.status === "COMPLETED");
   const awaitingReviewCount = items.filter((i) => i.status === "AWAITING_REVIEW").length;
 
@@ -217,14 +242,15 @@ export default function EditorPage() {
       </div>
 
       <VideoGrid
-        items={activeItems}
+        items={items}
         batches={batches}
         profiles={profiles}
         onEdit={(item) => setEditingItemId(item.id)}
+        onDeleteItem={handleDeleteItem}
         onConfirmBatch={handleConfirmBatch}
+        onExportBatch={handleExportBatch}
+        exportingBatchId={exportingBatchId}
       />
-
-      <CompletedItemsPanel items={completedItems} batches={batches} profiles={profiles} />
 
       {isBatchModalOpen && (
         <BatchModal

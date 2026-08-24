@@ -1,3 +1,4 @@
+import { Download, Loader2 } from "lucide-react";
 import { VideoCard } from "./video-card";
 import { computeBatchStatus, ENGINE_LABELS } from "@/lib/editor/types";
 import type { Batch, BatchItem, Profile } from "@/lib/editor/types";
@@ -7,13 +8,19 @@ export function VideoGrid({
   batches,
   profiles,
   onEdit,
+  onDeleteItem,
   onConfirmBatch,
+  onExportBatch,
+  exportingBatchId,
 }: {
   items: BatchItem[];
   batches: Batch[];
   profiles: Profile[];
   onEdit: (item: BatchItem) => void;
+  onDeleteItem: (item: BatchItem) => void;
   onConfirmBatch: (batchId: string) => void;
+  onExportBatch: (batchId: string) => void;
+  exportingBatchId: string | null;
 }) {
   if (items.length === 0) {
     return (
@@ -36,33 +43,57 @@ export function VideoGrid({
         const canConfirm = computeBatchStatus(batchItems) === "AWAITING_REVIEW";
 
         return (
-          <div key={batch.id}>
-            <div className="mb-2 flex items-center justify-between">
-              <p className="text-xs text-muted">
-                <span className="font-semibold text-foreground">{profile.name}</span> ·{" "}
-                {ENGINE_LABELS[batch.engine]} · {batchItems.length} vídeo(s)
-              </p>
-              {canConfirm && (
+          <section key={batch.id} className="rounded-xl border border-border bg-[#0d0d0d]">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-foreground">{profile.name}</p>
+                <p className="mt-0.5 text-xs text-muted">
+                  {ENGINE_LABELS[batch.engine]} · {batchItems.length} vídeo(s) ·{" "}
+                  {batchItems.filter((item) => item.status === "COMPLETED").length} renderizado(s)
+                  {batch.storageProvider ? ` · exportado em ${batch.storageProvider}` : ""}
+                </p>
+                {batch.exportPath && (
+                  <p className="mt-1 truncate text-[11px] text-accent">
+                    Espaço interno: {batch.storageUrl ?? batch.exportPath}
+                  </p>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {canConfirm && (
+                  <button
+                    type="button"
+                    onClick={() => onConfirmBatch(batch.id)}
+                    className="rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-background"
+                  >
+                    Confirmar lote
+                  </button>
+                )}
                 <button
                   type="button"
-                  onClick={() => onConfirmBatch(batch.id)}
-                  className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-background"
+                  onClick={() => onExportBatch(batch.id)}
+                  disabled={
+                    exportingBatchId === batch.id ||
+                    !batchItems.some((item) => item.status === "COMPLETED")
+                  }
+                  className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  Confirmar lote
+                  {exportingBatchId === batch.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
+                  Exportar lote
                 </button>
-              )}
+              </div>
             </div>
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] gap-3">
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-3 p-4">
               {batchItems.map((item) => (
                 <VideoCard
                   key={item.id}
                   item={item}
                   profile={profile}
                   onEdit={() => onEdit(item)}
+                  onDelete={() => onDeleteItem(item)}
                 />
               ))}
             </div>
-          </div>
+          </section>
         );
       })}
     </div>
