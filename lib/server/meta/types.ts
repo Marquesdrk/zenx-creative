@@ -40,7 +40,7 @@ export type SocialAccount = {
 /** Mesma forma de SocialAccount — nunca inclui o token, então é seguro devolver direto pra UI. */
 export type PublicSocialAccount = SocialAccount;
 
-export type ScheduledPostStatus = "scheduled" | "processing" | "published" | "failed" | "cancelled";
+export type ScheduledPostStatus = "draft" | "scheduled" | "processing" | "published" | "failed" | "cancelled";
 
 export type ScheduledPost = {
   id: string;

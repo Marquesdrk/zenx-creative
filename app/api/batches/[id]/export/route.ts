@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
-import { batchesRepo, batchItemsRepo } from "@/lib/server/db";
+import { batchesRepo, batchItemsRepo, scheduledPostsRepo } from "@/lib/server/db";
+import { deletePublicUrl } from "@/lib/server/public-files";
+import type { ScheduledPost } from "@/lib/server/meta/types";
 
 function sanitizeDownloadFilename(name: string) {
   const ext = ".mp4";
@@ -24,13 +26,34 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ error: "Renderize ao menos um vídeo antes de exportar o lote." }, { status: 400 });
   }
 
-  const files = completedItems.map((item, index) => ({
-    url: item.renderedUrl!,
-    filename: sanitizeDownloadFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
+  const now = new Date().toISOString();
+  const posts: ScheduledPost[] = completedItems.map((item, index) => ({
+    id: crypto.randomUUID(),
+    userId: null,
+    videoUrl: item.renderedUrl!,
+    caption: item.manualOverrides.caption,
+    scheduledAt: null,
+    status: "draft",
+    createdAt: now,
+    updatedAt: now,
   }));
 
+  for (const post of posts) {
+    scheduledPostsRepo.create(post);
+  }
+
+  await Promise.all(completedItems.map((item) => deletePublicUrl(item.contentUrl)));
+
+  for (const item of batchItemsRepo.list().filter((candidate) => candidate.batchId === id)) {
+    batchItemsRepo.remove(item.id);
+  }
+  batchesRepo.remove(id);
+
   return NextResponse.json({
-    batch: batchesRepo.list().find((candidate) => candidate.id === id),
-    files,
+    movedToPublishing: posts.map((post, index) => ({
+      post,
+      filename: sanitizeDownloadFilename(`${String(index + 1).padStart(2, "0")}-${completedItems[index].filename}`),
+    })),
+    removedBatchId: id,
   });
 }

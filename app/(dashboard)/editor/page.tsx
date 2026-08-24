@@ -165,14 +165,10 @@ export default function EditorPage() {
     const res = await fetch(`/api/batches/${batchId}/export`, { method: "POST" });
     setExportingBatchId(null);
     if (!res.ok) return;
-    const data = (await res.json()) as { files?: Array<{ url: string; filename: string }> };
-    for (const file of data.files ?? []) {
-      const link = document.createElement("a");
-      link.href = file.url;
-      link.download = file.filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
+    const data = (await res.json()) as { removedBatchId?: string };
+    if (data.removedBatchId) {
+      setBatches((current) => current.filter((batch) => batch.id !== data.removedBatchId));
+      setItems((current) => current.filter((item) => item.batchId !== data.removedBatchId));
     }
   }
 
@@ -227,8 +223,8 @@ export default function EditorPage() {
         legenda automaticamente.
       </p>
       <p className="mb-8 mt-1 text-xs text-muted">
-        Ao confirmar um lote, os vídeos são renderizados de verdade (ffmpeg). Ao exportar, eles
-        são baixados localmente no seu dispositivo, sem criar espaço interno ou enviar para nuvem.
+        Ao confirmar um lote, os vídeos são renderizados de verdade (ffmpeg). Ao mover para
+        publicação, o lote sai do editor e fica alocado na fila de Publicar.
       </p>
 
       <div className="mb-6 grid grid-cols-3 gap-4">

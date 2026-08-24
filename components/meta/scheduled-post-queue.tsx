@@ -67,22 +67,32 @@ export function ScheduledPostQueue({
                     {post.caption || "(sem legenda)"}
                   </p>
                   <p className="mt-1 text-[11px] text-muted">
-                    {post.scheduledAt ? new Date(post.scheduledAt).toLocaleString() : "Publicação imediata"}
+                    {post.status === "draft"
+                      ? "Aguardando destinos"
+                      : post.scheduledAt
+                        ? new Date(post.scheduledAt).toLocaleString()
+                        : "Publicação imediata"}
                   </p>
                   <div className="mt-2 flex flex-col gap-1.5">
-                    {destinations.map((destination) => {
-                      const account = accountsById.get(destination.socialAccountId);
-                      return (
-                        <div key={destination.id} className="flex items-center justify-between gap-2 rounded-md bg-background px-2 py-1.5">
-                          <span className="truncate text-[11px] text-gray-300">
-                            {account ? `${account.platform === "INSTAGRAM" ? "IG" : "FB"} · ${account.accountName}` : "Conta removida"}
-                          </span>
-                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_CLASS[destination.status]}`}>
-                            {STATUS_LABEL[destination.status]}
-                          </span>
-                        </div>
-                      );
-                    })}
+                    {destinations.length === 0 ? (
+                      <div className="rounded-md bg-background px-2 py-1.5 text-[11px] text-muted">
+                        Vídeo alocado para postagem. Selecione contas e horário antes de publicar.
+                      </div>
+                    ) : (
+                      destinations.map((destination) => {
+                        const account = accountsById.get(destination.socialAccountId);
+                        return (
+                          <div key={destination.id} className="flex items-center justify-between gap-2 rounded-md bg-background px-2 py-1.5">
+                            <span className="truncate text-[11px] text-gray-300">
+                              {account ? `${account.platform === "INSTAGRAM" ? "IG" : "FB"} · ${account.accountName}` : "Conta removida"}
+                            </span>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_CLASS[destination.status]}`}>
+                              {STATUS_LABEL[destination.status]}
+                            </span>
+                          </div>
+                        );
+                      })
+                    )}
                   </div>
                   {destinations.some((d) => d.status === "failed" && d.errorMessage) && (
                     <div className="mt-2 flex flex-col gap-1">
