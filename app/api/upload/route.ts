@@ -1,8 +1,9 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { generatedFileUrl, generatedFolder } from "@/lib/server/public-files";
 
-const UPLOAD_DIR = path.join(process.cwd(), "public", "uploads");
+const UPLOAD_DIR = generatedFolder("uploads");
 
 function extensionFor(file: File): string {
   const fromName = path.extname(file.name);
@@ -13,16 +14,6 @@ function extensionFor(file: File): string {
 }
 
 export async function POST(request: Request) {
-  if (process.env.VERCEL) {
-    return NextResponse.json(
-      {
-        error:
-          "O editor de vídeos precisa rodar localmente. A Vercel não permite salvar uploads temporários no filesystem do projeto.",
-      },
-      { status: 400 }
-    );
-  }
-
   const formData = await request.formData();
   const file = formData.get("file");
   if (!(file instanceof File)) {
@@ -34,5 +25,5 @@ export async function POST(request: Request) {
   const bytes = Buffer.from(await file.arrayBuffer());
   await writeFile(path.join(UPLOAD_DIR, filename), bytes);
 
-  return NextResponse.json({ url: `/uploads/${filename}`, filename: file.name });
+  return NextResponse.json({ url: generatedFileUrl("uploads", filename), filename: file.name });
 }

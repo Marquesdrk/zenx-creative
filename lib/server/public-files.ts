@@ -3,9 +3,23 @@ import { mkdir, rm, copyFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
 const PUBLIC_DIR = path.join(/*turbopackIgnore: true*/ process.cwd(), "public");
+const GENERATED_DIR = process.env.VERCEL ? path.join("/tmp", "zenx-files") : PUBLIC_DIR;
+const GENERATED_KINDS = new Set(["uploads", "renders", "batch-space"]);
+
+export function generatedFolder(kind: "uploads" | "renders" | "batch-space") {
+  return path.join(GENERATED_DIR, kind);
+}
+
+export function generatedFileUrl(kind: "uploads" | "renders" | "batch-space", filename: string) {
+  return process.env.VERCEL ? `/api/files/${kind}/${filename}` : `/${kind}/${filename}`;
+}
 
 export function publicUrlToPath(url: string) {
   const clean = url.split("?")[0]?.replace(/^\//, "") ?? "";
+  const parts = clean.split("/");
+  if (parts[0] === "api" && parts[1] === "files" && GENERATED_KINDS.has(parts[2] ?? "")) {
+    return path.join(GENERATED_DIR, ...parts.slice(2));
+  }
   return path.join(PUBLIC_DIR, clean);
 }
 
@@ -23,7 +37,12 @@ export function sanitizeFilename(name: string) {
 export async function deletePublicUrl(url: string | null | undefined) {
   if (!url || !url.startsWith("/")) return;
   const filePath = publicUrlToPath(url);
-  if (!filePath.startsWith(PUBLIC_DIR) || !existsSync(filePath)) return;
+  const canDeletePublicGenerated =
+    filePath.startsWith(path.join(PUBLIC_DIR, "uploads") + path.sep) ||
+    filePath.startsWith(path.join(PUBLIC_DIR, "renders") + path.sep) ||
+    filePath.startsWith(path.join(PUBLIC_DIR, "batch-space") + path.sep);
+  const canDeleteTmpGenerated = filePath.startsWith(GENERATED_DIR + path.sep);
+  if ((!canDeletePublicGenerated && !canDeleteTmpGenerated) || !existsSync(filePath)) return;
   await rm(filePath, { force: true });
 }
 
@@ -43,5 +62,5 @@ export async function copyPublicUrlToFolder(url: string, destinationFolder: stri
 }
 
 export function batchSpaceFolder(batchId: string) {
-  return path.join(PUBLIC_DIR, "batch-space", batchId);
+  return path.join(generatedFolder("batch-space"), batchId);
 }

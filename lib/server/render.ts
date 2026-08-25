@@ -7,18 +7,17 @@ import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import { computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
 import { resolveXStyleLayout, type BatchItem, type CropBox, type Profile } from "@/lib/editor/types";
+import { generatedFileUrl, generatedFolder, publicUrlToPath } from "@/lib/server/public-files";
 
 if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic);
 ffmpeg.setFfprobePath((ffprobeStatic as { path: string }).path);
 
 const OUTPUT_WIDTH = 1080;
 const OUTPUT_HEIGHT = 1920;
-const RENDER_DIR = path.join(process.cwd(), "public", "renders");
-const FONT_FILE = "C\\:/Windows/Fonts/arial.ttf";
-
-function publicUrlToPath(url: string): string {
-  return path.join(process.cwd(), "public", url.replace(/^\//, ""));
-}
+const RENDER_DIR = generatedFolder("renders");
+const FONT_FILE = existsSync("C:\\Windows\\Fonts\\arial.ttf")
+  ? "C\\:/Windows/Fonts/arial.ttf"
+  : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
 
 const ROTATE_FILTERS: Record<number, string[]> = {
   0: [],
@@ -351,7 +350,7 @@ export async function renderBatchItem(item: BatchItem, profile: Profile): Promis
     } else {
       await renderTransformOnly(item, source, contentPath, outputPath);
     }
-    return { renderedUrl: `/renders/${outputFilename}` };
+    return { renderedUrl: generatedFileUrl("renders", outputFilename) };
   } catch (err) {
     return { error: err instanceof Error ? err.message : "Falha desconhecida ao renderizar." };
   }
