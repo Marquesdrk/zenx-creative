@@ -2,8 +2,8 @@ import ffmpegStatic from "ffmpeg-static";
 // @ts-expect-error -- ffprobe-static ships no type declarations.
 import ffprobeStatic from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
-import sharp from "sharp";
-import { existsSync } from "node:fs";
+import * as PImage from "pureimage";
+import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
@@ -22,6 +22,11 @@ const ROTATE_FILTERS: Record<number, string[]> = {
   180: ["hflip", "vflip"],
   270: ["transpose=2"],
 };
+
+const TEXT_FONT_PATH = existsSync("C:\\Windows\\Fonts\\arialbd.ttf")
+  ? "C:\\Windows\\Fonts\\arialbd.ttf"
+  : "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+let textFontPromise: Promise<void> | null = null;
 
 /** Recorte "cover": mesmo cálculo usado pelo editor visual (components/editor/crop-editor.tsx)
  *  via lib/editor/crop-geometry.ts — prévia e vídeo final nunca divergem. */
@@ -193,15 +198,6 @@ async function renderReact(
   );
 }
 
-function escapeXmlText(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;");
-}
-
 function wrapText(text: string, maxChars: number, maxLines: number): string[] {
   let remaining = text.replace(/\s+/g, " ").trim();
   if (!remaining) return [];
@@ -229,7 +225,15 @@ function wrapText(text: string, maxChars: number, maxLines: number): string[] {
   return lines;
 }
 
-function svgTextBlock(
+async function ensureTextFont() {
+  if (!textFontPromise) {
+    textFontPromise = PImage.registerFont(TEXT_FONT_PATH, "ZenxSans").load();
+  }
+  await textFontPromise;
+}
+
+function drawTextBlock(
+  ctx: ReturnType<ReturnType<typeof PImage.make>["getContext"]>,
   text: string,
   options: {
     x: number;
@@ -240,23 +244,17 @@ function svgTextBlock(
     lineHeight: number;
     weight?: "bold";
   }
-): string {
+): void {
   const maxChars = Math.max(10, Math.floor(options.maxWidth / (options.fontSize * 0.52)));
   const lines = wrapText(text, maxChars, options.maxLines);
-  if (lines.length === 0) return "";
+  if (lines.length === 0) return;
 
-  const tspans = lines
-    .map(
-      (line, index) =>
-        `<tspan x="${options.x}" dy="${index === 0 ? 0 : options.lineHeight}">${escapeXmlText(line)}</tspan>`
-    )
-    .join("");
-
-  return (
-    `<text x="${options.x}" y="${options.y}" font-family="Arial, DejaVu Sans, sans-serif" ` +
-    `font-size="${options.fontSize}" font-weight="${options.weight === "bold" ? 700 : 500}" ` +
-    `fill="#000" dominant-baseline="hanging">${tspans}</text>`
-  );
+  ctx.fillStyle = "black";
+  ctx.font = `${options.fontSize}pt ZenxSans`;
+  ctx.textBaseline = "top";
+  lines.forEach((line, index) => {
+    ctx.fillText(line, options.x, options.y + index * options.lineHeight);
+  });
 }
 
 async function createXStyleTextOverlay(item: BatchItem, profile: Profile, outputPath: string) {
@@ -264,30 +262,31 @@ async function createXStyleTextOverlay(item: BatchItem, profile: Profile, output
 
   const layout = resolveXStyleLayout(profile.xStyleLayout);
   const title = item.manualOverrides.title || profile.defaultTitle || "";
-  const svg = `
-    <svg width="${OUTPUT_WIDTH}" height="${OUTPUT_HEIGHT}" viewBox="0 0 ${OUTPUT_WIDTH} ${OUTPUT_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
-      ${svgTextBlock(title, {
-        x: layout.title.x,
-        y: layout.title.y,
-        fontSize: layout.title.fontSize,
-        maxWidth: layout.title.maxWidth,
-        maxLines: layout.title.maxLines,
-        lineHeight: Math.round(layout.title.fontSize * 1.12),
-        weight: "bold",
-      })}
-      ${svgTextBlock(item.manualOverrides.caption, {
-        x: layout.body.x,
-        y: layout.body.y,
-        fontSize: layout.body.fontSize,
-        maxWidth: layout.body.maxWidth,
-        maxLines: layout.body.maxLines,
-        lineHeight: Math.round(layout.body.fontSize * 1.25),
-        weight: "bold",
-      })}
-    </svg>
-  `;
+  await ensureTextFont();
+  const image = PImage.make(OUTPUT_WIDTH, OUTPUT_HEIGHT);
+  const ctx = image.getContext("2d");
+  ctx.clearRect(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+  drawTextBlock(ctx, title, {
+    x: layout.title.x,
+    y: layout.title.y,
+    fontSize: layout.title.fontSize,
+    maxWidth: layout.title.maxWidth,
+    maxLines: layout.title.maxLines,
+    lineHeight: Math.round(layout.title.fontSize * 1.12),
+    weight: "bold",
+  });
+  drawTextBlock(ctx, item.manualOverrides.caption, {
+    x: layout.body.x,
+    y: layout.body.y,
+    fontSize: layout.body.fontSize,
+    maxWidth: layout.body.maxWidth,
+    maxLines: layout.body.maxLines,
+    lineHeight: Math.round(layout.body.fontSize * 1.25),
+    weight: "bold",
+  });
+
   const overlayPath = outputPath.replace(/\.mp4$/i, "-text.png");
-  await sharp(Buffer.from(svg)).png().toFile(overlayPath);
+  await PImage.encodePNGToStream(image, createWriteStream(overlayPath));
   return overlayPath;
 }
 
