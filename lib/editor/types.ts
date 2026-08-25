@@ -68,7 +68,7 @@ export type XStyleVideoFrame = XStyleLayout["video"];
 export const DEFAULT_X_STYLE_LAYOUT: XStyleLayout = {
   title: { x: 70, y: 325, fontSize: 48, maxWidth: 940, maxLines: 2 },
   video: { x: 70, y: 455, width: 940, height: 1120 },
-  body: { x: 120, y: 1615, fontSize: 34, maxWidth: 840, maxLines: 4 },
+  body: { x: 70, y: 1600, fontSize: 54, maxWidth: 940, maxLines: 2 },
 };
 
 export function resolveXStyleLayout(

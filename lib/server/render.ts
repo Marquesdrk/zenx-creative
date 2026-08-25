@@ -241,6 +241,7 @@ function drawTextBlock(
     maxLines: number;
     lineHeight: number;
     weight?: "bold";
+    align?: "left" | "center";
   }
 ): void {
   const maxChars = Math.max(10, Math.floor(options.maxWidth / (options.fontSize * 0.52)));
@@ -251,7 +252,12 @@ function drawTextBlock(
   ctx.font = `${options.fontSize}pt ZenxSans`;
   ctx.textBaseline = "top";
   lines.forEach((line, index) => {
-    ctx.fillText(line, options.x, options.y + index * options.lineHeight);
+    const metrics = ctx.measureText(line);
+    const x =
+      options.align === "center"
+        ? options.x + Math.max(0, (options.maxWidth - metrics.width) / 2)
+        : options.x;
+    ctx.fillText(line, x, options.y + index * options.lineHeight);
   });
 }
 
@@ -279,8 +285,9 @@ async function createXStyleTextOverlay(item: BatchItem, profile: Profile, output
     fontSize: layout.body.fontSize,
     maxWidth: layout.body.maxWidth,
     maxLines: layout.body.maxLines,
-    lineHeight: Math.round(layout.body.fontSize * 1.25),
+    lineHeight: Math.round(layout.body.fontSize * 1.12),
     weight: "bold",
+    align: "center",
   });
 
   const overlayPath = outputPath.replace(/\.mp4$/i, "-text.png");

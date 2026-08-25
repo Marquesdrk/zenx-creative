@@ -217,7 +217,7 @@ export function VideoFrame({
             {title || profile.defaultTitle || "Titulo do video"}
           </p>
           <p
-            className="absolute line-clamp-4 text-left font-bold leading-snug text-neutral-950"
+            className="absolute line-clamp-2 text-center font-bold leading-tight text-neutral-950"
             style={{
               left: `${(xStyleLayout.body.x / 1080) * 100}%`,
               top: `${(xStyleLayout.body.y / 1920) * 100}%`,

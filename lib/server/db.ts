@@ -70,7 +70,7 @@ function seedDefaults(db: DatabaseSync) {
       | {
           title?: { x?: number; y?: number; maxLines?: number };
           video?: { x?: number; y?: number; width?: number; height?: number };
-          body?: { x?: number; y?: number };
+          body?: { x?: number; y?: number; fontSize?: number; maxWidth?: number; maxLines?: number };
         }
       | undefined;
     const usesLegacyStack =
@@ -88,8 +88,16 @@ function seedDefaults(db: DatabaseSync) {
         layout.video?.width === 940 &&
         layout.video?.height === 1120 &&
         (layout.title?.x === undefined || layout.title?.maxLines === undefined));
-    if (!usesLegacyStack) continue;
-    data.xStyleLayout = DEFAULT_X_STYLE_LAYOUT;
+    const usesSmallLowerCaption =
+      !layout?.body ||
+      layout.body.fontSize === undefined ||
+      layout.body.fontSize <= 40 ||
+      (layout.body.x === 120 && layout.body.y === 1615 && layout.body.maxWidth === 840);
+
+    if (!usesLegacyStack && !usesSmallLowerCaption) continue;
+    data.xStyleLayout = usesLegacyStack
+      ? DEFAULT_X_STYLE_LAYOUT
+      : { ...DEFAULT_X_STYLE_LAYOUT, ...layout, body: DEFAULT_X_STYLE_LAYOUT.body };
     db.prepare("UPDATE profiles SET data = ? WHERE id = ?").run(JSON.stringify(data), row.id);
   }
 }
