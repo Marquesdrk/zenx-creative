@@ -165,10 +165,22 @@ export default function EditorPage() {
     const res = await fetch(`/api/batches/${batchId}/export`, { method: "POST" });
     setExportingBatchId(null);
     if (!res.ok) return;
-    const data = (await res.json()) as { removedBatchId?: string };
-    if (data.removedBatchId) {
-      setBatches((current) => current.filter((batch) => batch.id !== data.removedBatchId));
-      setItems((current) => current.filter((item) => item.batchId !== data.removedBatchId));
+    const blob = await res.blob();
+    const downloadUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const disposition = res.headers.get("Content-Disposition") ?? "";
+    const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `lote-${batchId}.zip`;
+    link.href = downloadUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(downloadUrl);
+
+    const removedBatchId = res.headers.get("X-Removed-Batch-Id");
+    if (removedBatchId) {
+      setBatches((current) => current.filter((batch) => batch.id !== removedBatchId));
+      setItems((current) => current.filter((item) => item.batchId !== removedBatchId));
     }
   }
 
@@ -223,8 +235,8 @@ export default function EditorPage() {
         legenda automaticamente.
       </p>
       <p className="mb-8 mt-1 text-xs text-muted">
-        Ao confirmar um lote, os vídeos são renderizados de verdade (ffmpeg). Ao mover para
-        publicação, o lote sai do editor e fica alocado na fila de Publicar.
+        Ao confirmar um lote, os vídeos são renderizados de verdade (ffmpeg). Ao exportar, você
+        baixa um ZIP com todos os vídeos editados e o lote sai do editor.
       </p>
 
       <div className="mb-6 grid grid-cols-3 gap-4">
