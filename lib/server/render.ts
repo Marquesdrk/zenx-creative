@@ -2,8 +2,9 @@ import ffmpegStatic from "ffmpeg-static";
 // @ts-expect-error -- ffprobe-static ships no type declarations.
 import ffprobeStatic from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
+import sharp from "sharp";
 import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import path from "node:path";
 import { computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
 import { resolveXStyleLayout, type BatchItem, type CropBox, type Profile } from "@/lib/editor/types";
@@ -15,10 +16,6 @@ ffmpeg.setFfprobePath((ffprobeStatic as { path: string }).path);
 const OUTPUT_WIDTH = 1080;
 const OUTPUT_HEIGHT = 1920;
 const RENDER_DIR = generatedFolder("renders");
-const FONT_FILE = existsSync("C:\\Windows\\Fonts\\arial.ttf")
-  ? "C\\:/Windows/Fonts/arial.ttf"
-  : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
-
 const ROTATE_FILTERS: Record<number, string[]> = {
   0: [],
   90: ["transpose=1"],
@@ -196,14 +193,13 @@ async function renderReact(
   );
 }
 
-function escapeDrawtextText(text: string): string {
+function escapeXmlText(text: string): string {
   return text
-    .replace(/\\/g, "\\\\")
-    .replace(/'/g, "\\'")
-    .replace(/:/g, "\\:")
-    .replace(/,/g, "\\,")
-    .replace(/\[/g, "\\[")
-    .replace(/\]/g, "\\]");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 function wrapText(text: string, maxChars: number, maxLines: number): string[] {
@@ -233,9 +229,7 @@ function wrapText(text: string, maxChars: number, maxLines: number): string[] {
   return lines;
 }
 
-function drawLeftTextFilters(
-  inputLabel: string,
-  outputLabel: string,
+function svgTextBlock(
   text: string,
   options: {
     x: number;
@@ -246,24 +240,55 @@ function drawLeftTextFilters(
     lineHeight: number;
     weight?: "bold";
   }
-): string[] {
+): string {
   const maxChars = Math.max(10, Math.floor(options.maxWidth / (options.fontSize * 0.52)));
   const lines = wrapText(text, maxChars, options.maxLines);
-  if (lines.length === 0) return [`[${inputLabel}]copy[${outputLabel}]`];
+  if (lines.length === 0) return "";
 
-  const filters: string[] = [];
-  let current = inputLabel;
-  lines.forEach((line, index) => {
-    const next = index === lines.length - 1 ? outputLabel : `${outputLabel}${index}`;
-    const y = options.y + index * options.lineHeight;
-    const border = options.weight === "bold" ? ":borderw=0" : "";
-    filters.push(
-      `[${current}]drawtext=fontfile='${FONT_FILE}':text='${escapeDrawtextText(line)}':` +
-        `fontcolor=black:fontsize=${options.fontSize}${border}:x=${options.x}:y=${y}[${next}]`
-    );
-    current = next;
-  });
-  return filters;
+  const tspans = lines
+    .map(
+      (line, index) =>
+        `<tspan x="${options.x}" dy="${index === 0 ? 0 : options.lineHeight}">${escapeXmlText(line)}</tspan>`
+    )
+    .join("");
+
+  return (
+    `<text x="${options.x}" y="${options.y}" font-family="Arial, DejaVu Sans, sans-serif" ` +
+    `font-size="${options.fontSize}" font-weight="${options.weight === "bold" ? 700 : 500}" ` +
+    `fill="#000" dominant-baseline="hanging">${tspans}</text>`
+  );
+}
+
+async function createXStyleTextOverlay(item: BatchItem, profile: Profile, outputPath: string) {
+  if (profile.engine !== "X_STYLE") return null;
+
+  const layout = resolveXStyleLayout(profile.xStyleLayout);
+  const title = item.manualOverrides.title || profile.defaultTitle || "";
+  const svg = `
+    <svg width="${OUTPUT_WIDTH}" height="${OUTPUT_HEIGHT}" viewBox="0 0 ${OUTPUT_WIDTH} ${OUTPUT_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+      ${svgTextBlock(title, {
+        x: layout.title.x,
+        y: layout.title.y,
+        fontSize: layout.title.fontSize,
+        maxWidth: layout.title.maxWidth,
+        maxLines: layout.title.maxLines,
+        lineHeight: Math.round(layout.title.fontSize * 1.12),
+        weight: "bold",
+      })}
+      ${svgTextBlock(item.manualOverrides.caption, {
+        x: layout.body.x,
+        y: layout.body.y,
+        fontSize: layout.body.fontSize,
+        maxWidth: layout.body.maxWidth,
+        maxLines: layout.body.maxLines,
+        lineHeight: Math.round(layout.body.fontSize * 1.25),
+        weight: "bold",
+      })}
+    </svg>
+  `;
+  const overlayPath = outputPath.replace(/\.mp4$/i, "-text.png");
+  await sharp(Buffer.from(svg)).png().toFile(overlayPath);
+  return overlayPath;
 }
 
 async function renderXStyle(
@@ -283,39 +308,29 @@ async function renderXStyle(
   const layout = resolveXStyleLayout(profile.xStyleLayout);
   const videoFrame = item.manualOverrides.xStyleVideoFrame ?? layout.video;
   const contentFilters = buildContentFilters(item, source, videoFrame.width, videoFrame.height);
-  const title = item.manualOverrides.title || profile.defaultTitle || "";
+  const textOverlayPath = await createXStyleTextOverlay(item, profile, outputPath);
   const filterGraph = [
     `[1:v]scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}[bg]`,
     `[0:v]${contentFilters.join(",")}[content]`,
     `[bg][content]overlay=x=${videoFrame.x}:y=${videoFrame.y}:shortest=1[xbase]`,
-    ...drawLeftTextFilters("xbase", "xtitle", title, {
-      x: layout.title.x,
-      y: layout.title.y,
-      fontSize: layout.title.fontSize,
-      maxWidth: layout.title.maxWidth,
-      maxLines: layout.title.maxLines,
-      lineHeight: Math.round(layout.title.fontSize * 1.12),
-      weight: "bold",
-    }),
-    ...drawLeftTextFilters("xtitle", "outv", item.manualOverrides.caption, {
-      x: layout.body.x,
-      y: layout.body.y,
-      fontSize: layout.body.fontSize,
-      maxWidth: layout.body.maxWidth,
-      maxLines: layout.body.maxLines,
-      lineHeight: Math.round(layout.body.fontSize * 1.25),
-      weight: "bold",
-    }),
+    ...(textOverlayPath
+      ? [`[2:v]format=rgba[text]`, `[xbase][text]overlay=0:0:shortest=1[outv]`]
+      : [`[xbase]null[outv]`]),
   ];
-  await run(
-    [
-      { path: contentPath, options: contentInputOptions(item) },
-      { path: backgroundPath, options: ["-loop", "1"] },
-    ],
-    filterGraph,
-    outputPath,
-    item
-  );
+  try {
+    await run(
+      [
+        { path: contentPath, options: contentInputOptions(item) },
+        { path: backgroundPath, options: ["-loop", "1"] },
+        ...(textOverlayPath ? [{ path: textOverlayPath, options: ["-loop", "1"] }] : []),
+      ],
+      filterGraph,
+      outputPath,
+      item
+    );
+  } finally {
+    if (textOverlayPath) await rm(textOverlayPath, { force: true });
+  }
 }
 
 export type RenderOutcome = { renderedUrl: string } | { error: string };
