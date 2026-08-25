@@ -1,5 +1,6 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
 import { useEffect, useRef, useState } from "react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
 import { EditDrawer } from "@/components/editor/edit-drawer";
@@ -146,37 +147,57 @@ export default function EditorPage() {
       return;
     }
 
-    const formData = new FormData();
-    formData.append("payload", JSON.stringify({ batchId, profile, items: batchItems }));
-    for (const item of batchItems) {
-      const file = fileRefs.current.get(item.id);
-      if (file) formData.append(`file:${item.id}`, file, item.filename);
-    }
-
     setExportingBatchId(batchId);
     setPageError(null);
-    const res = await fetch("/api/batches/export-local", { method: "POST", body: formData });
-    setExportingBatchId(null);
-    if (!res.ok) {
-      const data = (await res.json().catch(() => null)) as { error?: string } | null;
-      setPageError(data?.error ?? "Falha ao exportar o lote.");
-      return;
-    }
-    const blob = await res.blob();
-    const downloadUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const disposition = res.headers.get("Content-Disposition") ?? "";
-    const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `lote-${batchId}.zip`;
-    link.href = downloadUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    URL.revokeObjectURL(downloadUrl);
+    try {
+      const uploadedItems = await Promise.all(
+        batchItems.map(async (item) => {
+          const file = fileRefs.current.get(item.id);
+          if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
+          const blob = await upload(`editor-batches/${batchId}/${item.id}-${file.name}`, file, {
+            access: "private",
+            handleUploadUrl: "/api/blob/upload",
+            multipart: true,
+            contentType: file.type || "video/mp4",
+          });
+          return { ...item, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname };
+        })
+      );
 
-    batchItems.forEach(removeLocalItemFiles);
-    setBatches((current) => current.filter((candidate) => candidate.id !== batchId));
-    setItems((current) => current.filter((item) => item.batchId !== batchId));
+      const res = await fetch("/api/batches/export-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId, profile, items: uploadedItems }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        let message = text;
+        try {
+          message = (JSON.parse(text) as { error?: string }).error ?? text;
+        } catch {}
+        throw new Error(message || `Falha ao exportar o lote (${res.status}).`);
+      }
+
+      const blob = await res.blob();
+      const downloadUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `lote-${batchId}.zip`;
+      link.href = downloadUrl;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(downloadUrl);
+
+      batchItems.forEach(removeLocalItemFiles);
+      setBatches((current) => current.filter((candidate) => candidate.id !== batchId));
+      setItems((current) => current.filter((item) => item.batchId !== batchId));
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Falha ao exportar o lote.");
+    } finally {
+      setExportingBatchId(null);
+    }
   }
 
   function handleSaveEdit(updated: BatchItem, applyToAll: boolean) {
