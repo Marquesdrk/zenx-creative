@@ -18,6 +18,7 @@ import {
 const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 const OUTPUT_WIDTH = 1080;
 const OUTPUT_HEIGHT = 1920;
+const MIN_X_STYLE_FRAME_SIZE = 80;
 const REACT_REACTION_HEIGHT_RATIO = 0.36;
 
 /** Mesma proporção usada pelo render real (lib/server/render.ts) por engine — o editor
@@ -94,10 +95,10 @@ export function EditDrawer({
       ...xStyleVideoFrame,
       ...patch,
     };
-    next.width = Math.round(Math.min(980, Math.max(240, next.width)));
-    next.height = Math.round(Math.min(1300, Math.max(180, next.height)));
-    next.x = Math.round(Math.min(1080 - next.width, Math.max(0, next.x)));
-    next.y = Math.round(Math.min(1920 - next.height, Math.max(0, next.y)));
+    next.width = Math.round(Math.min(OUTPUT_WIDTH, Math.max(MIN_X_STYLE_FRAME_SIZE, next.width)));
+    next.height = Math.round(Math.min(OUTPUT_HEIGHT, Math.max(MIN_X_STYLE_FRAME_SIZE, next.height)));
+    next.x = Math.round(Math.min(OUTPUT_WIDTH - next.width, Math.max(0, next.x)));
+    next.y = Math.round(Math.min(OUTPUT_HEIGHT - next.height, Math.max(0, next.y)));
     updateOverrides({ xStyleVideoFrame: next });
   }
 
@@ -305,7 +306,7 @@ export function EditDrawer({
               {profile.engine === "X_STYLE" && xStyleVideoFrame && defaultXStyleVideoFrame && (
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <SectionLabel>Área do vídeo no template</SectionLabel>
+                    <SectionLabel>Dimensão do vídeo no template</SectionLabel>
                     <button
                       type="button"
                       onClick={() => updateOverrides({ xStyleVideoFrame: null })}
@@ -318,13 +319,24 @@ export function EditDrawer({
                     {([
                       ["x", "X", 0, 1080 - xStyleVideoFrame.width],
                       ["y", "Y", 0, 1920 - xStyleVideoFrame.height],
-                      ["width", "Largura", 240, 980],
-                      ["height", "Altura", 180, 1300],
+                      ["width", "Largura", MIN_X_STYLE_FRAME_SIZE, OUTPUT_WIDTH],
+                      ["height", "Altura", MIN_X_STYLE_FRAME_SIZE, OUTPUT_HEIGHT],
                     ] as const).map(([key, label, min, max]) => (
                       <label key={key} className="rounded-lg border border-border bg-card p-3">
-                        <span className="mb-2 flex items-center justify-between text-xs font-semibold text-muted">
+                        <span className="mb-2 flex items-center justify-between gap-3 text-xs font-semibold text-muted">
                           {label}
-                          <span className="tabular-nums text-gray-300">{xStyleVideoFrame[key]}px</span>
+                          <span className="flex items-center gap-1">
+                            <input
+                              type="number"
+                              min={min}
+                              max={Math.max(min, max)}
+                              step={4}
+                              value={xStyleVideoFrame[key]}
+                              onChange={(event) => updateXStyleVideoFrame({ [key]: Number(event.target.value) })}
+                              className="h-7 w-20 rounded-md border border-border bg-[#111] px-2 text-right text-xs tabular-nums text-gray-200 outline-none focus:border-accent"
+                            />
+                            <span className="text-gray-400">px</span>
+                          </span>
                         </span>
                         <input
                           type="range"
@@ -358,7 +370,7 @@ export function EditDrawer({
 
               <div>
                 <div className="mb-2 flex items-center justify-between">
-                  <SectionLabel>Recorte</SectionLabel>
+                  <SectionLabel>Recorte do conteúdo</SectionLabel>
                   <span className="text-[11px] tabular-nums text-gray-400">
                     {overrides.cropZoom.toFixed(1)}×
                   </span>
