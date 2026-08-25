@@ -150,11 +150,12 @@ export default function EditorPage() {
     setExportingBatchId(batchId);
     setPageError(null);
     try {
+      const exportId = crypto.randomUUID();
       const uploadedItems = await Promise.all(
         batchItems.map(async (item) => {
           const file = fileRefs.current.get(item.id);
           if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
-          const blob = await upload(`editor-batches/${batchId}/${item.id}-${file.name}`, file, {
+          const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
             access: "private",
             handleUploadUrl: "/api/blob/upload",
             multipart: true,

@@ -17,7 +17,7 @@ export async function POST(request: Request) {
 
         return {
           allowedContentTypes: ["video/mp4", "video/quicktime", "video/webm", "video/x-m4v"],
-          addRandomSuffix: false,
+          addRandomSuffix: true,
           tokenPayload: JSON.stringify({ pathname }),
         };
       },
