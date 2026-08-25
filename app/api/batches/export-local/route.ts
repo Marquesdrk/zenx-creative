@@ -14,6 +14,7 @@ type ExportPayload = {
   batchId: string;
   profile: Profile;
   items: Array<BatchItem & { blobUrl?: string; blobDownloadUrl?: string; blobPathname?: string }>;
+  response?: "zip" | "video";
 };
 
 function isPayload(value: unknown): value is ExportPayload {
@@ -75,6 +76,11 @@ export async function POST(request: Request) {
 
   try {
     const { payload, formData } = await parseRequest(request);
+    const responseMode = payload.response ?? "zip";
+
+    if (responseMode === "video" && payload.items.length !== 1) {
+      return NextResponse.json({ error: "A exportação individual aceita apenas um vídeo por chamada." }, { status: 400 });
+    }
 
     for (const [index, item] of payload.items.entries()) {
       let contentUrl: string;
@@ -105,9 +111,20 @@ export async function POST(request: Request) {
       }
 
       temporaryUrls.push(outcome.renderedUrl);
+      const renderedContent = await readFile(publicUrlToPath(outcome.renderedUrl));
+
+      if (responseMode === "video") {
+        return new NextResponse(renderedContent, {
+          headers: {
+            "Content-Type": "video/mp4",
+            "Content-Disposition": `attachment; filename="${zipVideoFilename(item.filename)}"`,
+          },
+        });
+      }
+
       zipFiles.push({
         filename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
-        content: await readFile(publicUrlToPath(outcome.renderedUrl)),
+        content: renderedContent,
       });
     }
 

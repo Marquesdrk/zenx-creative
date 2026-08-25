@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
+import { createZipBlob, zipArchiveFilename, zipVideoFilename } from "@/lib/editor/client-zip";
 import { useProfiles } from "@/lib/editor/profiles-store";
 import { useTemplates } from "@/lib/editor/templates-store";
 import { analyzeVideoSource } from "@/lib/editor/source-analysis";
@@ -151,41 +152,48 @@ export default function EditorPage() {
     setPageError(null);
     try {
       const exportId = crypto.randomUUID();
-      const uploadedItems = await Promise.all(
-        batchItems.map(async (item) => {
-          const file = fileRefs.current.get(item.id);
-          if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
-          const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
-            access: "private",
-            handleUploadUrl: "/api/blob/upload",
-            multipart: true,
-            contentType: file.type || "video/mp4",
-          });
-          return { ...item, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname };
-        })
-      );
+      const zipFiles: Array<{ filename: string; content: Uint8Array }> = [];
 
-      const res = await fetch("/api/batches/export-local", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batchId, profile, items: uploadedItems }),
-      });
-      if (!res.ok) {
-        const text = await res.text();
-        let message = text;
-        try {
-          message = (JSON.parse(text) as { error?: string }).error ?? text;
-        } catch {}
-        throw new Error(message || `Falha ao exportar o lote (${res.status}).`);
+      for (const [index, item] of batchItems.entries()) {
+        const file = fileRefs.current.get(item.id);
+        if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
+        const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
+          access: "private",
+          handleUploadUrl: "/api/blob/upload",
+          multipart: true,
+          contentType: file.type || "video/mp4",
+        });
+
+        const res = await fetch("/api/batches/export-local", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            batchId,
+            profile,
+            response: "video",
+            items: [{ ...item, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname }],
+          }),
+        });
+        if (!res.ok) {
+          const text = await res.text();
+          let message = text;
+          try {
+            message = (JSON.parse(text) as { error?: string }).error ?? text;
+          } catch {}
+          throw new Error(message || `Falha ao exportar "${item.filename}" (${res.status}).`);
+        }
+
+        zipFiles.push({
+          filename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
+          content: new Uint8Array(await res.arrayBuffer()),
+        });
       }
 
-      const blob = await res.blob();
-      const downloadUrl = URL.createObjectURL(blob);
+      const zipBlob = createZipBlob(zipFiles);
+      const downloadUrl = URL.createObjectURL(zipBlob);
       const link = document.createElement("a");
-      const disposition = res.headers.get("Content-Disposition") ?? "";
-      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `lote-${batchId}.zip`;
       link.href = downloadUrl;
-      link.download = filename;
+      link.download = zipArchiveFilename(`lote-${batchId}`);
       document.body.appendChild(link);
       link.click();
       link.remove();
