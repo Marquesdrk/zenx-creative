@@ -4,6 +4,13 @@ import { deletePublicUrl } from "@/lib/server/public-files";
 import type { BatchItem } from "@/lib/editor/types";
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (process.env.VERCEL) {
+    return NextResponse.json(
+      { error: "No deploy, edições do editor ficam somente na sessão do navegador." },
+      { status: 410, headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+    );
+  }
+
   const { id } = await params;
   const patch = (await request.json()) as Partial<BatchItem>;
   const existing = batchItemsRepo.get(id);
@@ -15,6 +22,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (process.env.VERCEL) {
+    return NextResponse.json(
+      { ok: true, removedId: null, removedBatchId: null },
+      { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+    );
+  }
+
   const { id } = await params;
   const existing = batchItemsRepo.get(id);
   if (!existing) {

@@ -17,6 +17,13 @@ async function processItem(itemId: string, profileId: string) {
 }
 
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  if (process.env.VERCEL) {
+    return NextResponse.json(
+      { error: "No deploy, lotes do editor são renderizados somente no momento da exportação." },
+      { status: 410, headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+    );
+  }
+
   const { id: batchId } = await params;
   const batch = batchesRepo.list().find((b) => b.id === batchId);
   if (!batch) {

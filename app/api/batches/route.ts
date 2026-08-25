@@ -3,6 +3,12 @@ import { batchesRepo, batchItemsRepo } from "@/lib/server/db";
 import type { Batch, BatchItem, Engine, ManualOverrides, SourceAnalysis } from "@/lib/editor/types";
 
 export async function GET() {
+  if (process.env.VERCEL) {
+    return NextResponse.json(
+      { batches: [], items: [] },
+      { headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+    );
+  }
   return NextResponse.json({ batches: batchesRepo.list(), items: batchItemsRepo.list() });
 }
 
@@ -19,6 +25,13 @@ type CreateBatchBody = {
 };
 
 export async function POST(request: Request) {
+  if (process.env.VERCEL) {
+    return NextResponse.json(
+      { error: "No deploy, o editor não salva lotes no servidor. Use a exportação local do editor." },
+      { status: 410, headers: { "Cache-Control": "no-store, no-cache, must-revalidate" } }
+    );
+  }
+
   const body = (await request.json()) as CreateBatchBody;
 
   const batch: Batch = {
