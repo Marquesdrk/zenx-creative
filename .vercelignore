@@ -1,0 +1,6 @@
+data/
+public/uploads/
+public/renders/
+public/batch-space/
+_to_delete/
+.claude/settings.local.json

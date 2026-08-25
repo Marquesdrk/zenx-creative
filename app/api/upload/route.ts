@@ -13,6 +13,16 @@ function extensionFor(file: File): string {
 }
 
 export async function POST(request: Request) {
+  if (process.env.VERCEL) {
+    return NextResponse.json(
+      {
+        error:
+          "O editor de vídeos precisa rodar localmente. A Vercel não permite salvar uploads temporários no filesystem do projeto.",
+      },
+      { status: 400 }
+    );
+  }
+
   const formData = await request.formData();
   const file = formData.get("file");
   if (!(file instanceof File)) {

@@ -30,7 +30,7 @@ import type {
   SocialPlatform,
 } from "@/lib/server/meta/types";
 
-const DATA_DIR = path.join(process.cwd(), "data");
+const DATA_DIR = process.env.VERCEL ? path.join("/tmp", "zenx-data") : path.join(process.cwd(), "data");
 mkdirSync(DATA_DIR, { recursive: true });
 
 // Reused across hot reloads in dev (Next.js clears the module cache per request in some

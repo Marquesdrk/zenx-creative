@@ -30,6 +30,7 @@ export default function EditorPage() {
   const [isBatchModalOpen, setBatchModalOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
+  const [pageError, setPageError] = useState<string | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refresh = useCallback(async () => {
@@ -69,7 +70,7 @@ export default function EditorPage() {
   async function handleBatchSubmit(params: { profileId: string; files: BatchSourceFile[] }) {
     const profile = profiles.find((p) => p.id === params.profileId);
     if (!profile) return;
-    setBatchModalOpen(false);
+    setPageError(null);
 
     const template = templates.find((t) => t.id === profile.templateId);
     const watermarkDefaults =
@@ -79,16 +80,23 @@ export default function EditorPage() {
 
     // Envia os arquivos reais ao servidor antes de criar o lote — contentUrl passa a ser
     // uma URL pública persistida (/uploads/...), não um object URL que se perde ao recarregar.
-    const uploaded = await Promise.all(
-      params.files.map(async ({ name, file }, index) => ({
-        filename: name,
-        contentUrl: file ? await uploadFile(file) : null,
-        reactionMediaId:
-          profile.engine === "REACT" && profile.reactionMedia.length > 0
-            ? profile.reactionMedia[index % profile.reactionMedia.length].id
-            : null,
-      }))
-    );
+    let uploaded: Array<{ filename: string; contentUrl: string | null; reactionMediaId: string | null }>;
+    try {
+      uploaded = await Promise.all(
+        params.files.map(async ({ name, file }, index) => ({
+          filename: name,
+          contentUrl: file ? await uploadFile(file) : null,
+          reactionMediaId:
+            profile.engine === "REACT" && profile.reactionMedia.length > 0
+              ? profile.reactionMedia[index % profile.reactionMedia.length].id
+              : null,
+        }))
+      );
+    } catch (error) {
+      setPageError(error instanceof Error ? error.message : "Falha ao enviar os arquivos do lote.");
+      return;
+    }
+    setBatchModalOpen(false);
 
     const res = await fetch("/api/batches", {
       method: "POST",
@@ -238,6 +246,11 @@ export default function EditorPage() {
         Ao confirmar um lote, os vídeos são renderizados de verdade (ffmpeg). Ao exportar, você
         baixa um ZIP com todos os vídeos editados e o lote sai do editor.
       </p>
+      {pageError && (
+        <div className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
+          {pageError}
+        </div>
+      )}
 
       <div className="mb-6 grid grid-cols-3 gap-4">
         <div className="rounded-xl border border-border bg-card p-4">
