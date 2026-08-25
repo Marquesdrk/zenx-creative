@@ -120,7 +120,7 @@ export function EditDrawer({
 
   return (
     <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/70 p-6">
-      <div className="flex max-h-[92vh] w-[980px] flex-col overflow-hidden rounded-2xl border border-border bg-[#101010]">
+      <div className="flex max-h-[92vh] w-full max-w-[1220px] flex-col overflow-hidden rounded-2xl border border-border bg-[#101010]">
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="min-w-0">
             <h2 className="text-base font-semibold text-foreground">Editar vídeo</h2>
@@ -137,43 +137,79 @@ export function EditDrawer({
         </div>
 
         <div className="flex flex-1 overflow-hidden">
-          {/* Prévia — maior e fixa, pra dar uma ideia clara e parada de como o vídeo final vai ficar. */}
-          <div className="flex w-[340px] shrink-0 flex-col gap-3 overflow-y-auto border-r border-border bg-black/30 p-6">
-            <div className="mx-auto w-full max-w-[280px]">
-              {profile.engine === "UGC" ? (
-                <WatermarkCanvas
-                  profile={profile}
-                  caption={overrides.caption}
-                  contentUrl={draft.contentUrl}
-                  contentCropBox={overrides.cropBox}
-                  contentCropZoom={overrides.cropZoom}
-                  contentFit={overrides.fit}
-                  contentRotation={overrides.rotation}
-                  onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
-                  watermarkPosition={overrides.watermarkPosition}
-                  onWatermarkPositionChange={(watermarkPosition) => updateOverrides({ watermarkPosition })}
-                />
-              ) : (
-                <VideoFrame
-                  profile={profile}
-                  title={overrides.title}
-                  caption={overrides.caption}
-                  contentUrl={draft.contentUrl}
-                  contentCropBox={overrides.cropBox}
-                  contentCropZoom={overrides.cropZoom}
-                  contentFit={overrides.fit}
-                  contentRotation={overrides.rotation}
-                  xStyleVideoFrame={overrides.xStyleVideoFrame}
-                  onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
-                  reactionMediaUrl={
-                    profile.engine === "REACT"
-                      ? (profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.url ??
-                        null)
-                      : null
-                  }
-                />
-              )}
-            </div>
+          {/* Prévias fixas para comparar a arte do template com o resultado final. */}
+          <div
+            className={`flex shrink-0 flex-col gap-3 overflow-y-auto border-r border-border bg-black/30 p-6 ${
+              profile.engine === "X_STYLE" ? "w-[620px]" : "w-[340px]"
+            }`}
+          >
+            {profile.engine === "X_STYLE" ? (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="min-w-0">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Template</p>
+                  <VideoFrame
+                    profile={profile}
+                    title={overrides.title}
+                    caption={overrides.caption}
+                    contentUrl={null}
+                    xStyleVideoFrame={overrides.xStyleVideoFrame}
+                  />
+                </div>
+                <div className="min-w-0">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Completo</p>
+                  <VideoFrame
+                    profile={profile}
+                    title={overrides.title}
+                    caption={overrides.caption}
+                    contentUrl={draft.contentUrl}
+                    contentCropBox={overrides.cropBox}
+                    contentCropZoom={overrides.cropZoom}
+                    contentFit={overrides.fit}
+                    contentRotation={overrides.rotation}
+                    playing
+                    xStyleVideoFrame={overrides.xStyleVideoFrame}
+                    onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="mx-auto w-full max-w-[280px]">
+                {profile.engine === "UGC" ? (
+                  <WatermarkCanvas
+                    profile={profile}
+                    caption={overrides.caption}
+                    contentUrl={draft.contentUrl}
+                    contentCropBox={overrides.cropBox}
+                    contentCropZoom={overrides.cropZoom}
+                    contentFit={overrides.fit}
+                    contentRotation={overrides.rotation}
+                    onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
+                    watermarkPosition={overrides.watermarkPosition}
+                    onWatermarkPositionChange={(watermarkPosition) => updateOverrides({ watermarkPosition })}
+                  />
+                ) : (
+                  <VideoFrame
+                    profile={profile}
+                    title={overrides.title}
+                    caption={overrides.caption}
+                    contentUrl={draft.contentUrl}
+                    contentCropBox={overrides.cropBox}
+                    contentCropZoom={overrides.cropZoom}
+                    contentFit={overrides.fit}
+                    contentRotation={overrides.rotation}
+                    playing
+                    xStyleVideoFrame={overrides.xStyleVideoFrame}
+                    onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
+                    reactionMediaUrl={
+                      profile.engine === "REACT"
+                        ? (profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.url ??
+                          null)
+                        : null
+                    }
+                  />
+                )}
+              </div>
+            )}
 
             {draft.sourceAnalysis && (
               <div className="mx-auto flex w-full max-w-[280px] items-center justify-between gap-2">

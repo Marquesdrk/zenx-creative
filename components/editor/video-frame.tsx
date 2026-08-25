@@ -26,6 +26,7 @@ function VideoThumbnail({
   cropZoom = 1,
   fit = "cover",
   rotation = 0,
+  playing = false,
   onDragPosition,
   style,
 }: {
@@ -38,6 +39,7 @@ function VideoThumbnail({
   cropZoom?: number;
   fit?: FitMode;
   rotation?: Rotation;
+  playing?: boolean;
   /** Quando presente, arrastar sobre o vídeo reposiciona o recorte ao vivo — mais direto
    *  que digitar em sliders pra alinhar o conteúdo. */
   onDragPosition?: (next: CropBox) => void;
@@ -85,6 +87,8 @@ function VideoThumbnail({
         <video
           src={url}
           muted
+          autoPlay={playing}
+          loop={playing}
           playsInline
           preload="metadata"
           // Sem isso o vídeo pausado mostra um frame preto até o usuário interagir — busca um
@@ -117,6 +121,7 @@ export function VideoFrame({
   contentCropZoom = 1,
   contentFit = "cover",
   contentRotation = 0,
+  playing = false,
   reactionMediaUrl = null,
   watermarkPosition = null,
   xStyleVideoFrame = null,
@@ -131,6 +136,7 @@ export function VideoFrame({
   contentCropZoom?: number;
   contentFit?: FitMode;
   contentRotation?: Rotation;
+  playing?: boolean;
   /** Só relevante quando profile.engine === "REACT". */
   reactionMediaUrl?: string | null;
   /** Só relevante quando profile.engine === "UGC". Posição x/y é relativa (0 a 1). */
@@ -160,6 +166,7 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
+            playing={playing}
             onDragPosition={onContentPositionChange}
             className="absolute inset-x-0 bottom-0 top-[36%] z-0"
           />
@@ -196,6 +203,7 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
+            playing={playing}
             onDragPosition={onContentPositionChange}
             className="absolute bg-black"
             style={{
@@ -238,6 +246,7 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
+            playing={playing}
             onDragPosition={onContentPositionChange}
             className="absolute inset-0"
           />
