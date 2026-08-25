@@ -23,9 +23,7 @@ const ROTATE_FILTERS: Record<number, string[]> = {
   270: ["transpose=2"],
 };
 
-const TEXT_FONT_PATH = existsSync("C:\\Windows\\Fonts\\arialbd.ttf")
-  ? "C:\\Windows\\Fonts\\arialbd.ttf"
-  : "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+const TEXT_FONT_PATH = path.join(process.cwd(), "assets", "fonts", "arialbd.ttf");
 let textFontPromise: Promise<void> | null = null;
 
 /** Recorte "cover": mesmo cálculo usado pelo editor visual (components/editor/crop-editor.tsx)
