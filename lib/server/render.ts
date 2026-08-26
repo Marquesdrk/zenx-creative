@@ -31,12 +31,40 @@ function isRemoteUrl(url: string) {
   return /^https?:\/\//i.test(url);
 }
 
+function isDataUrl(url: string) {
+  return /^data:[^;]+;base64,/i.test(url);
+}
+
 function extensionFromUrl(url: string) {
   const ext = path.extname(new URL(url).pathname);
   return ext || ".bin";
 }
 
+function extensionFromMimeType(mimeType: string) {
+  if (mimeType === "image/jpeg") return ".jpg";
+  if (mimeType === "image/png") return ".png";
+  if (mimeType === "image/webp") return ".webp";
+  if (mimeType === "image/gif") return ".gif";
+  if (mimeType === "video/mp4") return ".mp4";
+  if (mimeType === "video/quicktime") return ".mov";
+  if (mimeType === "video/webm") return ".webm";
+  return ".bin";
+}
+
+async function materializeDataUrl(url: string) {
+  const match = /^data:([^;]+);base64,(.*)$/i.exec(url);
+  if (!match) return null;
+  const uploadDir = generatedFolder("uploads");
+  await mkdir(uploadDir, { recursive: true });
+  const filename = sanitizeFilename(`local-asset-${crypto.randomUUID()}${extensionFromMimeType(match[1])}`);
+  const filePath = path.join(uploadDir, filename);
+  await writeFile(filePath, Buffer.from(match[2], "base64"));
+  return { path: filePath, cleanup: true };
+}
+
 async function materializeMediaUrl(url: string) {
+  if (isDataUrl(url)) return materializeDataUrl(url);
+
   if (!isRemoteUrl(url)) {
     const filePath = publicUrlToPath(url);
     return existsSync(filePath) ? { path: filePath, cleanup: false } : null;
