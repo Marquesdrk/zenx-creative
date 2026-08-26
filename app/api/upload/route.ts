@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { put } from "@vercel/blob";
 import { NextResponse } from "next/server";
 import { generatedFileUrl, generatedFolder } from "@/lib/server/public-files";
 
@@ -20,8 +21,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Campo 'file' ausente ou inválido." }, { status: 400 });
   }
 
-  await mkdir(UPLOAD_DIR, { recursive: true });
   const filename = `${crypto.randomUUID()}${extensionFor(file)}`;
+
+  if (process.env.VERCEL) {
+    const blob = await put(`profile-assets/${filename}`, file, {
+      access: "public",
+      addRandomSuffix: true,
+      contentType: file.type || undefined,
+    });
+    return NextResponse.json({ url: blob.url, filename: file.name });
+  }
+
+  await mkdir(UPLOAD_DIR, { recursive: true });
   const bytes = Buffer.from(await file.arrayBuffer());
   await writeFile(path.join(UPLOAD_DIR, filename), bytes);
 

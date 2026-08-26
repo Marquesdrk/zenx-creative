@@ -4,11 +4,12 @@ import ffprobeStatic from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import * as PImage from "pureimage";
 import { createWriteStream, existsSync } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
+import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
 import { resolveXStyleLayout, type BatchItem, type CropBox, type Profile } from "@/lib/editor/types";
-import { generatedFileUrl, generatedFolder, publicUrlToPath } from "@/lib/server/public-files";
+import { generatedFileUrl, generatedFolder, publicUrlToPath, sanitizeFilename } from "@/lib/server/public-files";
 
 if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic);
 ffmpeg.setFfprobePath((ffprobeStatic as { path: string }).path);
@@ -25,6 +26,49 @@ const ROTATE_FILTERS: Record<number, string[]> = {
 
 const TEXT_FONT_PATH = path.join(process.cwd(), "assets", "fonts", "arialbd.ttf");
 let textFontPromise: Promise<void> | null = null;
+
+function isRemoteUrl(url: string) {
+  return /^https?:\/\//i.test(url);
+}
+
+function extensionFromUrl(url: string) {
+  const ext = path.extname(new URL(url).pathname);
+  return ext || ".bin";
+}
+
+async function materializeMediaUrl(url: string) {
+  if (!isRemoteUrl(url)) {
+    const filePath = publicUrlToPath(url);
+    return existsSync(filePath) ? { path: filePath, cleanup: false } : null;
+  }
+
+  const response = await fetch(url);
+  if (!response.ok) return null;
+  const uploadDir = generatedFolder("uploads");
+  await mkdir(uploadDir, { recursive: true });
+  const filename = sanitizeFilename(`remote-${crypto.randomUUID()}${extensionFromUrl(url)}`);
+  const filePath = path.join(uploadDir, filename);
+  await writeFile(filePath, Buffer.from(await response.arrayBuffer()));
+  return { path: filePath, cleanup: true };
+}
+
+async function cleanupMaterializedMedia(media: { path: string; cleanup: boolean } | null) {
+  if (media?.cleanup) await rm(media.path, { force: true });
+}
+
+function xStyleBackgroundCandidates(profile: Profile) {
+  if (profile.engine !== "X_STYLE") return [];
+  const candidates = profile.backgroundImageUrl ? [profile.backgroundImageUrl] : [];
+  const fallback = MOCK_PROFILES.find(
+    (candidate) =>
+      candidate.engine === "X_STYLE" &&
+      (candidate.id === profile.id || candidate.templateId === profile.templateId)
+  );
+  if (fallback?.engine === "X_STYLE" && fallback.backgroundImageUrl && !candidates.includes(fallback.backgroundImageUrl)) {
+    candidates.push(fallback.backgroundImageUrl);
+  }
+  return candidates;
+}
 
 /** Recorte "cover": mesmo cálculo usado pelo editor visual (components/editor/crop-editor.tsx)
  *  via lib/editor/crop-geometry.ts — prévia e vídeo final nunca divergem. */
@@ -139,8 +183,8 @@ async function renderUgc(
   outputPath: string
 ) {
   if (profile.engine !== "UGC") throw new Error("Perfil não é UGC");
-  const watermarkPath = profile.watermarkImageUrl ? publicUrlToPath(profile.watermarkImageUrl) : null;
-  if (!watermarkPath || !existsSync(watermarkPath)) {
+  const watermarkMedia = profile.watermarkImageUrl ? await materializeMediaUrl(profile.watermarkImageUrl) : null;
+  if (!watermarkMedia) {
     await renderTransformOnly(item, source, contentPath, outputPath);
     return;
   }
@@ -152,15 +196,19 @@ async function renderUgc(
     `[1:v]scale=${wmWidth}:-1,format=rgba,colorchannelmixer=aa=${wm.opacity}[wm]`,
     `[base][wm]overlay=x=${Math.round(wm.x * OUTPUT_WIDTH)}-overlay_w/2:y=${Math.round(wm.y * OUTPUT_HEIGHT)}-overlay_h/2:shortest=1[outv]`,
   ];
-  await run(
-    [
-      { path: contentPath, options: contentInputOptions(item) },
-      { path: watermarkPath, options: ["-loop", "1"] },
-    ],
-    filterGraph,
-    outputPath,
-    item
-  );
+  try {
+    await run(
+      [
+        { path: contentPath, options: contentInputOptions(item) },
+        { path: watermarkMedia.path, options: ["-loop", "1"] },
+      ],
+      filterGraph,
+      outputPath,
+      item
+    );
+  } finally {
+    await cleanupMaterializedMedia(watermarkMedia);
+  }
 }
 
 async function renderReact(
@@ -172,8 +220,8 @@ async function renderReact(
 ) {
   if (profile.engine !== "REACT") throw new Error("Perfil não é REACT");
   const reactionUrl = profile.reactionMedia.find((m) => m.id === item.manualOverrides.reactionMediaId)?.url ?? null;
-  const reactionPath = reactionUrl ? publicUrlToPath(reactionUrl) : null;
-  if (!reactionPath || !existsSync(reactionPath)) {
+  const reactionMedia = reactionUrl ? await materializeMediaUrl(reactionUrl) : null;
+  if (!reactionMedia) {
     await renderTransformOnly(item, source, contentPath, outputPath);
     return;
   }
@@ -185,15 +233,19 @@ async function renderReact(
     `[0:v]${contentFilters.join(",")}[bottom]`,
     `[top][bottom]vstack=inputs=2[outv]`,
   ];
-  await run(
-    [
-      { path: contentPath, options: contentInputOptions(item) },
-      { path: reactionPath, options: ["-stream_loop", "-1"] },
-    ],
-    filterGraph,
-    outputPath,
-    item
-  );
+  try {
+    await run(
+      [
+        { path: contentPath, options: contentInputOptions(item) },
+        { path: reactionMedia.path, options: ["-stream_loop", "-1"] },
+      ],
+      filterGraph,
+      outputPath,
+      item
+    );
+  } finally {
+    await cleanupMaterializedMedia(reactionMedia);
+  }
 }
 
 function wrapText(text: string, maxChars: number, maxLines: number): string[] {
@@ -303,11 +355,12 @@ async function renderXStyle(
   outputPath: string
 ) {
   if (profile.engine !== "X_STYLE") throw new Error("Perfil não é X_STYLE");
-  const backgroundPath = profile.backgroundImageUrl ? publicUrlToPath(profile.backgroundImageUrl) : null;
-  if (!backgroundPath || !existsSync(backgroundPath)) {
-    await renderTransformOnly(item, source, contentPath, outputPath);
-    return;
+  let backgroundMedia: Awaited<ReturnType<typeof materializeMediaUrl>> = null;
+  for (const backgroundUrl of xStyleBackgroundCandidates(profile)) {
+    backgroundMedia = await materializeMediaUrl(backgroundUrl);
+    if (backgroundMedia) break;
   }
+  if (!backgroundMedia) throw new Error("Template X Style não encontrado. Reimporte o template do perfil antes de exportar.");
 
   const layout = resolveXStyleLayout(profile.xStyleLayout);
   const videoFrame = item.manualOverrides.xStyleVideoFrame ?? layout.video;
@@ -325,7 +378,7 @@ async function renderXStyle(
     await run(
       [
         { path: contentPath, options: contentInputOptions(item) },
-        { path: backgroundPath, options: ["-loop", "1"] },
+        { path: backgroundMedia.path, options: ["-loop", "1"] },
         ...(textOverlayPath ? [{ path: textOverlayPath, options: ["-loop", "1"] }] : []),
       ],
       filterGraph,
@@ -334,6 +387,7 @@ async function renderXStyle(
     );
   } finally {
     if (textOverlayPath) await rm(textOverlayPath, { force: true });
+    await cleanupMaterializedMedia(backgroundMedia);
   }
 }
 
