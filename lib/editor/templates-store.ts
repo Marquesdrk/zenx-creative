@@ -1,29 +1,34 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
+import { MOCK_TEMPLATES } from "./mock-templates";
 import type { Engine, Template } from "./types";
 
+const STORAGE_KEY = "zenx-creative:editor:templates:v1";
+
 let cache: Template[] | null = null;
-let hydrating: Promise<void> | null = null;
 const listeners = new Set<() => void>();
 
 function notify() {
   listeners.forEach((listener) => listener());
 }
 
+function readStoredTemplates(): Template[] {
+  if (typeof window === "undefined") return MOCK_TEMPLATES;
+  const stored = window.localStorage.getItem(STORAGE_KEY);
+  if (!stored) return MOCK_TEMPLATES;
+  try {
+    const parsed = JSON.parse(stored) as Template[];
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : MOCK_TEMPLATES;
+  } catch {
+    return MOCK_TEMPLATES;
+  }
+}
+
 function ensureHydrated() {
-  if (cache !== null || hydrating) return;
-  hydrating = Promise.resolve()
-    .then(() => fetch("/api/templates"))
-    .then((res) => res.json())
-    .then((data: Template[]) => {
-      cache = data;
-      notify();
-    })
-    .catch(() => {
-      cache = [];
-      notify();
-    });
+  if (cache !== null) return;
+  cache = readStoredTemplates();
+  notify();
 }
 
 function subscribe(onStoreChange: () => void) {
@@ -41,21 +46,15 @@ function getServerSnapshot(): Template[] | null {
 }
 
 function persist(templates: Template[]) {
-  Promise.resolve()
-    .then(() =>
-      fetch("/api/templates", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(templates),
-      })
-    )
-    .catch(() => {});
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
 }
 
 /**
- * Templates do Editor em massa, persistidos no servidor (SQLite). Cada perfil aponta para
- * um via `templateId`. Hoje é sempre 1:1 (cada perfil cria o próprio template ao ser
- * criado), mas o modelo já suporta vários perfis reaproveitando o mesmo template.
+ * Templates do Editor em massa, persistidos localmente no navegador de cada máquina.
+ * Cada perfil aponta para um via `templateId`. Hoje é sempre 1:1 (cada perfil cria
+ * o próprio template ao ser criado), mas o modelo já suporta vários perfis reaproveitando
+ * o mesmo template.
  */
 export function useTemplates(): [
   Template[],
