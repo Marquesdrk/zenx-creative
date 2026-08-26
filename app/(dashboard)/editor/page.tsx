@@ -5,13 +5,15 @@ import { useEffect, useRef, useState } from "react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
+import { createZipBlob, zipArchiveFilename, zipVideoFilename } from "@/lib/editor/client-zip";
 import { useProfiles } from "@/lib/editor/profiles-store";
 import { useTemplates } from "@/lib/editor/templates-store";
 import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
 import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
 
-const MAX_PARALLEL_EXPORTS = 5;
+const MAX_PARALLEL_UPLOADS = 6;
+const MAX_PARALLEL_RENDERS = 8;
 
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
@@ -196,7 +198,7 @@ export default function EditorPage() {
 
       const uploadedItems = await mapWithConcurrency(
         batchItems.map((item, index) => ({ item, index })),
-        MAX_PARALLEL_EXPORTS,
+        MAX_PARALLEL_UPLOADS,
         async ({ item }) => {
           const file = fileRefs.current.get(item.id);
           if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
@@ -219,24 +221,38 @@ export default function EditorPage() {
         }
       );
 
-      setExportProgressLabel("Renderizando lote");
-      const res = await fetch("/api/batches/export-local", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batchId, profile, response: "zip", items: uploadedItems }),
-      });
-      if (!res.ok) {
-        const message = await responseErrorMessage(res, `Falha ao exportar o lote (${res.status}).`);
-        throw new Error(message);
-      }
+      let rendered = 0;
+      setExportProgressLabel(`Renderizando 0/${batchItems.length}`);
+      const zipFiles = await mapWithConcurrency(
+        uploadedItems.map((item, index) => ({ item, index })),
+        MAX_PARALLEL_RENDERS,
+        async ({ item, index }) => {
+          const res = await fetch("/api/batches/export-local", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ batchId, profile, response: "video", items: [item] }),
+          });
+          if (!res.ok) {
+            const message = await responseErrorMessage(res, `Falha ao exportar "${item.filename}" (${res.status}).`);
+            throw new Error(message);
+          }
 
-      const zipBlob = await res.blob();
+          const content = new Uint8Array(await res.arrayBuffer());
+          rendered += 1;
+          setExportProgressLabel(`Renderizando ${rendered}/${batchItems.length}`);
+          return {
+            filename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
+            content,
+          };
+        }
+      );
+
+      setExportProgressLabel("Gerando ZIP");
+      const zipBlob = createZipBlob(zipFiles);
       const downloadUrl = URL.createObjectURL(zipBlob);
       const link = document.createElement("a");
-      const disposition = res.headers.get("Content-Disposition") ?? "";
-      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `lote-${batchId}.zip`;
       link.href = downloadUrl;
-      link.download = filename;
+      link.download = zipArchiveFilename(`lote-${batchId}`);
       document.body.appendChild(link);
       link.click();
       link.remove();
