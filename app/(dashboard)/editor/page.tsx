@@ -5,7 +5,6 @@ import { useEffect, useRef, useState } from "react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
-import { createZipBlob, zipArchiveFilename, zipVideoFilename } from "@/lib/editor/client-zip";
 import { useProfiles } from "@/lib/editor/profiles-store";
 import { useTemplates } from "@/lib/editor/templates-store";
 import { analyzeVideoSource } from "@/lib/editor/source-analysis";
@@ -13,7 +12,6 @@ import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/edito
 import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
 
 const MAX_PARALLEL_EXPORTS = 5;
-const DIRECT_FUNCTION_UPLOAD_LIMIT = 80 * 1024 * 1024;
 
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
@@ -21,6 +19,22 @@ function generateCaption(filename: string, profile: Profile) {
     return "";
   }
   return `Legenda gerada automaticamente a partir de ${filename}`;
+}
+
+async function responseErrorMessage(res: Response, fallback: string) {
+  const contentType = res.headers.get("content-type") ?? "";
+  const text = await res.text();
+  if (contentType.includes("application/json")) {
+    try {
+      return (JSON.parse(text) as { error?: string }).error ?? fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
+    return `${fallback} A Vercel recusou a requisição antes do render.`;
+  }
+  return text || fallback;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -178,75 +192,51 @@ export default function EditorPage() {
     setPageError(null);
     try {
       const exportId = crypto.randomUUID();
-      let completed = 0;
+      let uploaded = 0;
 
-      const zipFiles = await mapWithConcurrency(
+      const uploadedItems = await mapWithConcurrency(
         batchItems.map((item, index) => ({ item, index })),
         MAX_PARALLEL_EXPORTS,
-        async ({ item, index }) => {
+        async ({ item }) => {
           const file = fileRefs.current.get(item.id);
           if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
 
-          const itemPayload = { ...item };
-          let res: Response;
-          if (file.size <= DIRECT_FUNCTION_UPLOAD_LIMIT) {
-            const formData = new FormData();
-            formData.append(
-              "payload",
-              JSON.stringify({
-                batchId,
-                profile,
-                response: "video",
-                items: [itemPayload],
-              })
-            );
-            formData.append(`file:${item.id}`, file);
-            res = await fetch("/api/batches/export-local", {
-              method: "POST",
-              body: formData,
-            });
-          } else {
-            const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
-              access: "private",
-              handleUploadUrl: "/api/blob/upload",
-              multipart: true,
-              contentType: file.type || "video/mp4",
-            });
-            res = await fetch("/api/batches/export-local", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                batchId,
-                profile,
-                response: "video",
-                items: [{ ...itemPayload, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname }],
-              }),
-            });
-          }
-          if (!res.ok) {
-            const text = await res.text();
-            let message = text;
-            try {
-              message = (JSON.parse(text) as { error?: string }).error ?? text;
-            } catch {}
-            throw new Error(message || `Falha ao exportar "${item.filename}" (${res.status}).`);
-          }
+          const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
+            access: "private",
+            handleUploadUrl: "/api/blob/upload",
+            multipart: true,
+            contentType: file.type || "video/mp4",
+          });
 
-          const content = new Uint8Array(await res.arrayBuffer());
-          completed += 1;
-          setExportProgressLabel(`Exportando ${completed}/${batchItems.length}`);
+          uploaded += 1;
+          setExportProgressLabel(`Enviando ${uploaded}/${batchItems.length}`);
           return {
-            filename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
-            content,
+            ...item,
+            blobUrl: blob.url,
+            blobDownloadUrl: blob.downloadUrl,
+            blobPathname: blob.pathname,
           };
         }
       );
 
-      const zipBlob = createZipBlob(zipFiles);
+      setExportProgressLabel("Renderizando lote");
+      const res = await fetch("/api/batches/export-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ batchId, profile, response: "zip", items: uploadedItems }),
+      });
+      if (!res.ok) {
+        const message = await responseErrorMessage(res, `Falha ao exportar o lote (${res.status}).`);
+        throw new Error(message);
+      }
+
+      const zipBlob = await res.blob();
       const downloadUrl = URL.createObjectURL(zipBlob);
       const link = document.createElement("a");
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const filename = disposition.match(/filename="([^"]+)"/)?.[1] ?? `lote-${batchId}.zip`;
       link.href = downloadUrl;
-      link.download = zipArchiveFilename(`lote-${batchId}`);
+      link.download = filename;
       document.body.appendChild(link);
       link.click();
       link.remove();

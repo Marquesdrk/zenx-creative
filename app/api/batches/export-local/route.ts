@@ -9,6 +9,7 @@ import { createZip, zipArchiveFilename, zipVideoFilename } from "@/lib/server/zi
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+const MAX_PARALLEL_RENDERS = 2;
 
 type ExportPayload = {
   batchId: string;
@@ -69,10 +70,30 @@ async function parseRequest(request: Request) {
   return { payload: parsed, formData };
 }
 
+async function mapWithConcurrency<T, R>(
+  entries: T[],
+  limit: number,
+  mapper: (entry: T) => Promise<R>
+) {
+  const results = new Array<R>(entries.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < entries.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(entries[currentIndex]);
+    }
+  }
+
+  const workerCount = Math.min(limit, entries.length);
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
+}
+
 export async function POST(request: Request) {
   const temporaryUrls: string[] = [];
   const blobUrlsToDelete: string[] = [];
-  const zipFiles: Array<{ filename: string; content: Buffer }> = [];
 
   try {
     const { payload, formData } = await parseRequest(request);
@@ -82,7 +103,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "A exportação individual aceita apenas um vídeo por chamada." }, { status: 400 });
     }
 
-    for (const [index, item] of payload.items.entries()) {
+    async function renderItem(item: ExportPayload["items"][number], index: number) {
       let contentUrl: string;
 
       if (item.blobUrl) {
@@ -91,7 +112,7 @@ export async function POST(request: Request) {
       } else {
         const file = formData?.get(`file:${item.id}`);
         if (!(file instanceof File)) {
-          return NextResponse.json({ error: `Arquivo original ausente: ${item.filename}` }, { status: 400 });
+          throw new Error(`Arquivo original ausente: ${item.filename}`);
         }
         contentUrl = await persistUploadedFile(file, item.id);
       }
@@ -113,20 +134,29 @@ export async function POST(request: Request) {
       temporaryUrls.push(outcome.renderedUrl);
       const renderedContent = await readFile(publicUrlToPath(outcome.renderedUrl));
 
-      if (responseMode === "video") {
-        return new NextResponse(renderedContent, {
-          headers: {
-            "Content-Type": "video/mp4",
-            "Content-Disposition": `attachment; filename="${zipVideoFilename(item.filename)}"`,
-          },
-        });
-      }
-
-      zipFiles.push({
-        filename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
+      return {
+        videoFilename: zipVideoFilename(item.filename),
+        zipFilename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
         content: renderedContent,
+      };
+    }
+
+    if (responseMode === "video") {
+      const rendered = await renderItem(payload.items[0], 0);
+      return new NextResponse(rendered.content, {
+        headers: {
+          "Content-Type": "video/mp4",
+          "Content-Disposition": `attachment; filename="${rendered.videoFilename}"`,
+        },
       });
     }
+
+    const renderedItems = await mapWithConcurrency(
+      payload.items.map((item, index) => ({ item, index })),
+      MAX_PARALLEL_RENDERS,
+      ({ item, index }) => renderItem(item, index)
+    );
+    const zipFiles = renderedItems.map((item) => ({ filename: item.zipFilename, content: item.content }));
 
     return new NextResponse(createZip(zipFiles), {
       headers: {
