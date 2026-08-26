@@ -145,7 +145,21 @@ function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: s
     if (!item.manualOverrides.muted) {
       outputOptions.push("-map", "0:a?", "-af", `volume=${item.manualOverrides.volume}`);
     }
-    outputOptions.push("-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", "-movflags", "+faststart");
+    outputOptions.push(
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "24",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-shortest",
+      "-movflags",
+      "+faststart"
+    );
 
     command
       .complexFilter(filterGraph)

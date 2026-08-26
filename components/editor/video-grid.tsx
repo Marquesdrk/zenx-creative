@@ -12,6 +12,7 @@ export function VideoGrid({
   onConfirmBatch,
   onExportBatch,
   exportingBatchId,
+  exportProgressLabel,
 }: {
   items: BatchItem[];
   batches: Batch[];
@@ -21,6 +22,7 @@ export function VideoGrid({
   onConfirmBatch: (batchId: string) => void;
   onExportBatch: (batchId: string) => void;
   exportingBatchId: string | null;
+  exportProgressLabel?: string | null;
 }) {
   if (items.length === 0) {
     return (
@@ -72,7 +74,7 @@ export function VideoGrid({
                   className="inline-flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs font-semibold text-gray-200 hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {exportingBatchId === batch.id ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                  Exportar lote
+                  {exportingBatchId === batch.id && exportProgressLabel ? exportProgressLabel : "Exportar lote"}
                 </button>
               </div>
             </div>
