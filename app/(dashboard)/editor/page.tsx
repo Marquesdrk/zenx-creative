@@ -12,7 +12,8 @@ import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
 import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
 
-const MAX_PARALLEL_EXPORTS = 4;
+const MAX_PARALLEL_EXPORTS = 5;
+const DIRECT_FUNCTION_UPLOAD_LIMIT = 80 * 1024 * 1024;
 
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
@@ -185,23 +186,43 @@ export default function EditorPage() {
         async ({ item, index }) => {
           const file = fileRefs.current.get(item.id);
           if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
-          const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
-            access: "private",
-            handleUploadUrl: "/api/blob/upload",
-            multipart: true,
-            contentType: file.type || "video/mp4",
-          });
 
-          const res = await fetch("/api/batches/export-local", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              batchId,
-              profile,
-              response: "video",
-              items: [{ ...item, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname }],
-            }),
-          });
+          const itemPayload = { ...item };
+          let res: Response;
+          if (file.size <= DIRECT_FUNCTION_UPLOAD_LIMIT) {
+            const formData = new FormData();
+            formData.append(
+              "payload",
+              JSON.stringify({
+                batchId,
+                profile,
+                response: "video",
+                items: [itemPayload],
+              })
+            );
+            formData.append(`file:${item.id}`, file);
+            res = await fetch("/api/batches/export-local", {
+              method: "POST",
+              body: formData,
+            });
+          } else {
+            const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
+              access: "private",
+              handleUploadUrl: "/api/blob/upload",
+              multipart: true,
+              contentType: file.type || "video/mp4",
+            });
+            res = await fetch("/api/batches/export-local", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                batchId,
+                profile,
+                response: "video",
+                items: [{ ...itemPayload, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname }],
+              }),
+            });
+          }
           if (!res.ok) {
             const text = await res.text();
             let message = text;

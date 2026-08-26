@@ -123,13 +123,14 @@ function buildContentFilters(
     // (ow-iw)*0.5 é o centro; usar cropBox.x/y no lugar do 0.5 fixo dá controle real de
     // "muito alto"/"muito baixo" em vez de sempre centralizar.
     filters.push(
-      `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease`,
+      `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease:flags=fast_bilinear`,
       `pad=${targetWidth}:${targetHeight}:(ow-iw)*${cropBox.x}:(oh-ih)*${cropBox.y}:color=black`
     );
   } else {
     filters.push(buildCropFilter(effWidth, effHeight, cropBox, cropZoom, targetWidth, targetHeight));
-    filters.push(`scale=${targetWidth}:${targetHeight}`);
+    filters.push(`scale=${targetWidth}:${targetHeight}:flags=fast_bilinear`);
   }
+  filters.push("fps=30");
   return filters;
 }
 
@@ -149,9 +150,9 @@ function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: s
       "-c:v",
       "libx264",
       "-preset",
-      "veryfast",
+      "ultrafast",
       "-crf",
-      "24",
+      "27",
       "-pix_fmt",
       "yuv420p",
       "-c:a",
