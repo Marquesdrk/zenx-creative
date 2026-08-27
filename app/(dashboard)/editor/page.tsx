@@ -13,7 +13,12 @@ import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/edito
 import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
 
 const MAX_PARALLEL_UPLOADS = 6;
-const MAX_PARALLEL_RENDERS = 8;
+const MAX_PARALLEL_RENDERS = 3;
+
+type TemporaryAssetUpload = {
+  url: string;
+  blobUrl: string | null;
+};
 
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
@@ -58,6 +63,97 @@ async function mapWithConcurrency<T, R>(
   const workerCount = Math.min(limit, entries.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
   return results;
+}
+
+function isDataUrl(value: unknown): value is string {
+  return typeof value === "string" && /^data:[^;]+;base64,/i.test(value);
+}
+
+function dataUrlToFile(dataUrl: string, filename: string) {
+  const [metadata, encoded] = dataUrl.split(",");
+  const mimeType = /^data:([^;]+);base64$/i.exec(metadata)?.[1] ?? "application/octet-stream";
+  const binary = window.atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], filename, { type: mimeType });
+}
+
+function extensionForMimeType(mimeType: string) {
+  if (mimeType === "image/jpeg") return ".jpg";
+  if (mimeType === "image/png") return ".png";
+  if (mimeType === "image/webp") return ".webp";
+  if (mimeType === "image/gif") return ".gif";
+  if (mimeType === "video/mp4") return ".mp4";
+  if (mimeType === "video/quicktime") return ".mov";
+  if (mimeType === "video/webm") return ".webm";
+  return ".bin";
+}
+
+async function uploadTemporaryAsset(
+  value: string | null | undefined,
+  params: { batchId: string; exportId: string; label: string }
+): Promise<TemporaryAssetUpload> {
+  if (!isDataUrl(value)) return { url: value ?? "", blobUrl: null };
+
+  const mimeType = /^data:([^;]+);base64,/i.exec(value)?.[1] ?? "application/octet-stream";
+  const file = dataUrlToFile(value, `${params.label}${extensionForMimeType(mimeType)}`);
+  const blob = await upload(`editor-assets/${params.batchId}/${params.exportId}/${params.label}${extensionForMimeType(mimeType)}`, file, {
+    access: "private",
+    handleUploadUrl: "/api/blob/upload",
+    contentType: file.type || mimeType,
+  });
+  return { url: blob.url, blobUrl: blob.url };
+}
+
+async function deleteTemporaryBlobs(urls: string[]) {
+  if (urls.length === 0) return;
+  await fetch("/api/blob/delete", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ urls }),
+  }).catch(() => {});
+}
+
+async function uploadTemporaryProfileAssets(profile: Profile, batchId: string, exportId: string) {
+  const blobUrls: string[] = [];
+
+  async function uploadProfileUrl(value: string | null | undefined, label: string) {
+    const uploaded = await uploadTemporaryAsset(value, { batchId, exportId, label });
+    if (uploaded.blobUrl) blobUrls.push(uploaded.blobUrl);
+    return uploaded.url || null;
+  }
+
+  if (profile.engine === "X_STYLE") {
+    const [avatarUrl, backgroundImageUrl] = await Promise.all([
+      uploadProfileUrl(profile.avatarUrl, "x-avatar"),
+      uploadProfileUrl(profile.backgroundImageUrl, "x-template"),
+    ]);
+    return {
+      profile: { ...profile, avatarUrl, backgroundImageUrl },
+      blobUrls,
+    };
+  }
+
+  if (profile.engine === "UGC") {
+    const watermarkImageUrl = await uploadProfileUrl(profile.watermarkImageUrl, "ugc-watermark");
+    return {
+      profile: { ...profile, watermarkImageUrl },
+      blobUrls,
+    };
+  }
+
+  const reactionMedia = await Promise.all(
+    profile.reactionMedia.map(async (media, index) => ({
+      ...media,
+      url: await uploadProfileUrl(media.url, `reaction-${index + 1}`),
+    }))
+  );
+  return {
+    profile: { ...profile, reactionMedia },
+    blobUrls,
+  };
 }
 
 export default function EditorPage() {
@@ -192,8 +288,13 @@ export default function EditorPage() {
     setExportingBatchId(batchId);
     setExportProgressLabel(`Exportando 0/${batchItems.length}`);
     setPageError(null);
+    let temporaryProfileBlobUrls: string[] = [];
     try {
       const exportId = crypto.randomUUID();
+      setExportProgressLabel("Preparando template");
+      const uploadedProfileAssets = await uploadTemporaryProfileAssets(profile, batchId, exportId);
+      const renderProfile = uploadedProfileAssets.profile;
+      temporaryProfileBlobUrls = uploadedProfileAssets.blobUrls;
       let uploaded = 0;
 
       const uploadedItems = await mapWithConcurrency(
@@ -230,7 +331,7 @@ export default function EditorPage() {
           const res = await fetch("/api/batches/export-local", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ batchId, profile, response: "video", items: [item] }),
+            body: JSON.stringify({ batchId, profile: renderProfile, response: "video", items: [item] }),
           });
           if (!res.ok) {
             const message = await responseErrorMessage(res, `Falha ao exportar "${item.filename}" (${res.status}).`);
@@ -264,6 +365,7 @@ export default function EditorPage() {
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "Falha ao exportar o lote.");
     } finally {
+      await deleteTemporaryBlobs(temporaryProfileBlobUrls);
       setExportingBatchId(null);
       setExportProgressLabel(null);
     }

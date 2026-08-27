@@ -11,12 +11,21 @@ export async function POST(request: Request) {
       body,
       request,
       onBeforeGenerateToken: async (pathname) => {
-        if (!pathname.startsWith("editor-batches/")) {
+        if (!pathname.startsWith("editor-batches/") && !pathname.startsWith("editor-assets/")) {
           throw new Error("Destino de upload inválido.");
         }
 
         return {
-          allowedContentTypes: ["video/mp4", "video/quicktime", "video/webm", "video/x-m4v"],
+          allowedContentTypes: [
+            "video/mp4",
+            "video/quicktime",
+            "video/webm",
+            "video/x-m4v",
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif",
+          ],
           addRandomSuffix: true,
           tokenPayload: JSON.stringify({ pathname }),
         };

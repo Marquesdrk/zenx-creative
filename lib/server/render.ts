@@ -3,6 +3,7 @@ import ffmpegStatic from "ffmpeg-static";
 import ffprobeStatic from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import * as PImage from "pureimage";
+import { get } from "@vercel/blob";
 import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -33,6 +34,10 @@ function isRemoteUrl(url: string) {
 
 function isDataUrl(url: string) {
   return /^data:[^;]+;base64,/i.test(url);
+}
+
+function isVercelBlobUrl(url: string) {
+  return /^https?:\/\/[^/]+\.blob\.vercel-storage\.com\//i.test(url);
 }
 
 function extensionFromUrl(url: string) {
@@ -70,7 +75,9 @@ async function materializeMediaUrl(url: string) {
     return existsSync(filePath) ? { path: filePath, cleanup: false } : null;
   }
 
-  const response = await fetch(url);
+  const blob = isVercelBlobUrl(url) ? await get(url, { access: "private", useCache: false }) : null;
+  const stream = blob?.stream ?? null;
+  const response = stream ? new Response(stream) : await fetch(url);
   if (!response.ok) return null;
   const uploadDir = generatedFolder("uploads");
   await mkdir(uploadDir, { recursive: true });
