@@ -4,13 +4,13 @@ import ffprobeStatic from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import * as PImage from "pureimage";
 import { get } from "@vercel/blob";
-import { createWriteStream, existsSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Readable } from "node:stream";
 import { computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
 import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
 import { resolveXStyleLayout, type BatchItem, type CropBox, type Profile } from "@/lib/editor/types";
+import { emojiAssetCode, isEmojiSegment, splitGraphemes, whatsappEmojiFilename } from "@/lib/emoji/whatsapp";
 import { generatedFileUrl, generatedFolder, publicUrlToPath, sanitizeFilename } from "@/lib/server/public-files";
 
 if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic);
@@ -27,12 +27,9 @@ const ROTATE_FILTERS: Record<number, string[]> = {
 };
 
 const TEXT_FONT_PATH = path.join(process.cwd(), "assets", "fonts", "arialbd.ttf");
+const WHATSAPP_EMOJI_DIR = path.join(process.cwd(), "public", "whatsapp-emoji", "png");
 let textFontPromise: Promise<void> | null = null;
 const emojiImageCache = new Map<string, Promise<PImage.Bitmap | null>>();
-const emojiSegmenter =
-  typeof Intl !== "undefined" && "Segmenter" in Intl
-    ? new Intl.Segmenter("pt-BR", { granularity: "grapheme" })
-    : null;
 
 function isRemoteUrl(url: string) {
   return /^https?:\/\//i.test(url);
@@ -331,67 +328,23 @@ function wrapText(text: string, maxChars: number, maxLines: number): string[] {
   return lines;
 }
 
-function splitGraphemes(text: string) {
-  if (emojiSegmenter) {
-    return Array.from(emojiSegmenter.segment(text), (segment) => segment.segment);
-  }
-  return Array.from(text);
-}
-
-function isEmojiSegment(segment: string) {
-  return (
-    /\p{Extended_Pictographic}/u.test(segment) ||
-    /^[\u{1f1e6}-\u{1f1ff}]{2}$/u.test(segment) ||
-    /^[0-9#*]\u{fe0f}?\u{20e3}$/u.test(segment)
-  );
-}
-
-function emojiCodePoints(segment: string, options?: { omitVariationSelectors?: boolean }) {
-  return Array.from(segment)
-    .map((character) => character.codePointAt(0))
-    .filter(
-      (codePoint): codePoint is number =>
-        Boolean(codePoint) && (!options?.omitVariationSelectors || codePoint !== 0xfe0f)
-    );
-}
-
-function notoEmojiAssetCode(segment: string) {
-  return emojiCodePoints(segment)
-    .map((codePoint) => codePoint.toString(16))
-    .join("_");
-}
-
-function twemojiAssetCode(segment: string) {
-  return emojiCodePoints(segment, { omitVariationSelectors: true })
-    .map((codePoint) => codePoint.toString(16))
-    .join("-");
-}
-
 async function loadEmojiImage(segment: string) {
-  const notoCode = notoEmojiAssetCode(segment);
-  const twemojiCode = twemojiAssetCode(segment);
-  const cacheKey = notoCode || twemojiCode;
+  const filename = whatsappEmojiFilename(segment);
+  const cacheKey = filename ?? emojiAssetCode(segment);
   if (!cacheKey) return null;
   const cached = emojiImageCache.get(cacheKey);
   if (cached) return cached;
 
   const promise = (async () => {
-    const urls = [
-      `https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/png/72/emoji_u${notoCode}.png`,
-      `https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/72/emoji_u${notoCode}.png`,
-      `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/${twemojiCode}.png`,
-      `https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/${twemojiCode}.png`,
-    ];
-    for (const url of urls) {
-      try {
-        const response = await fetch(url);
-        if (!response.ok) continue;
-        return await PImage.decodePNGFromStream(Readable.from(Buffer.from(await response.arrayBuffer())));
-      } catch {
-        // Keep rendering text even when the emoji CDN cannot be reached.
-      }
+    if (!filename) return null;
+    const emojiPath = path.join(WHATSAPP_EMOJI_DIR, filename);
+    if (!existsSync(emojiPath)) return null;
+
+    try {
+      return await PImage.decodePNGFromStream(createReadStream(emojiPath));
+    } catch {
+      return null;
     }
-    return null;
   })();
 
   emojiImageCache.set(cacheKey, promise);

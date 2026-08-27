@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type { CSSProperties } from "react";
 import { BadgeCheck, User } from "lucide-react";
+import { EmojiText } from "./emoji-text";
 import {
   DEFAULT_X_STYLE_LAYOUT,
   resolveXStyleLayout,
@@ -222,7 +223,7 @@ export function VideoFrame({
               fontSize: `${(xStyleLayout.title.fontSize / 1080) * 100}cqw`,
             }}
           >
-            {title || profile.defaultTitle || "Titulo do video"}
+            <EmojiText text={title || profile.defaultTitle || "Titulo do video"} />
           </p>
           <p
             className="absolute line-clamp-2 text-center font-bold leading-tight text-neutral-950"
@@ -233,7 +234,7 @@ export function VideoFrame({
               fontSize: `${(xStyleLayout.body.fontSize / 1080) * 100}cqw`,
             }}
           >
-            {caption}
+            <EmojiText text={caption} />
           </p>
         </div>
       )}
@@ -251,7 +252,7 @@ export function VideoFrame({
             className="absolute inset-0"
           />
           <p className="absolute left-1/2 top-[62%] max-w-[85%] -translate-x-1/2 truncate rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-foreground">
-            {caption}
+            <EmojiText text={caption} />
           </p>
           {watermarkPosition && profile.watermarkImageUrl && (
             // eslint-disable-next-line @next/next/no-img-element -- object URL, not an optimizable static asset
