@@ -7,6 +7,7 @@ import { get } from "@vercel/blob";
 import { createWriteStream, existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { Readable } from "node:stream";
 import { computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
 import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
 import { resolveXStyleLayout, type BatchItem, type CropBox, type Profile } from "@/lib/editor/types";
@@ -27,6 +28,11 @@ const ROTATE_FILTERS: Record<number, string[]> = {
 
 const TEXT_FONT_PATH = path.join(process.cwd(), "assets", "fonts", "arialbd.ttf");
 let textFontPromise: Promise<void> | null = null;
+const emojiImageCache = new Map<string, Promise<PImage.Bitmap | null>>();
+const emojiSegmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter("pt-BR", { granularity: "grapheme" })
+    : null;
 
 function isRemoteUrl(url: string) {
   return /^https?:\/\//i.test(url);
@@ -325,6 +331,90 @@ function wrapText(text: string, maxChars: number, maxLines: number): string[] {
   return lines;
 }
 
+function splitGraphemes(text: string) {
+  if (emojiSegmenter) {
+    return Array.from(emojiSegmenter.segment(text), (segment) => segment.segment);
+  }
+  return Array.from(text);
+}
+
+function isEmojiSegment(segment: string) {
+  return (
+    /\p{Extended_Pictographic}/u.test(segment) ||
+    /^[\u{1f1e6}-\u{1f1ff}]{2}$/u.test(segment) ||
+    /^[0-9#*]\u{fe0f}?\u{20e3}$/u.test(segment)
+  );
+}
+
+function emojiAssetCode(segment: string) {
+  return Array.from(segment)
+    .map((character) => character.codePointAt(0))
+    .filter((codePoint): codePoint is number => Boolean(codePoint) && codePoint !== 0xfe0f)
+    .map((codePoint) => codePoint.toString(16))
+    .join("-");
+}
+
+async function loadEmojiImage(segment: string) {
+  const code = emojiAssetCode(segment);
+  if (!code) return null;
+  const cached = emojiImageCache.get(code);
+  if (cached) return cached;
+
+  const promise = (async () => {
+    const urls = [
+      `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/${code}.png`,
+      `https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/${code}.png`,
+    ];
+    for (const url of urls) {
+      try {
+        const response = await fetch(url);
+        if (!response.ok) continue;
+        return await PImage.decodePNGFromStream(Readable.from(Buffer.from(await response.arrayBuffer())));
+      } catch {
+        // Keep rendering text even when the emoji CDN cannot be reached.
+      }
+    }
+    return null;
+  })();
+
+  emojiImageCache.set(code, promise);
+  return promise;
+}
+
+function measureRichText(ctx: ReturnType<ReturnType<typeof PImage.make>["getContext"]>, text: string, emojiSize: number) {
+  return splitGraphemes(text).reduce((width, segment) => {
+    if (isEmojiSegment(segment)) return width + emojiSize;
+    return width + ctx.measureText(segment).width;
+  }, 0);
+}
+
+async function drawRichText(
+  ctx: ReturnType<ReturnType<typeof PImage.make>["getContext"]>,
+  text: string,
+  x: number,
+  y: number,
+  fontSize: number
+) {
+  const emojiSize = Math.round(fontSize * 1.05);
+  let cursorX = x;
+
+  for (const segment of splitGraphemes(text)) {
+    if (isEmojiSegment(segment)) {
+      const emoji = await loadEmojiImage(segment);
+      if (emoji) {
+        ctx.drawImage(emoji, 0, 0, emoji.width, emoji.height, cursorX, y - Math.round(fontSize * 0.05), emojiSize, emojiSize);
+      } else {
+        ctx.fillText(segment, cursorX, y);
+      }
+      cursorX += emojiSize;
+      continue;
+    }
+
+    ctx.fillText(segment, cursorX, y);
+    cursorX += ctx.measureText(segment).width;
+  }
+}
+
 async function ensureTextFont() {
   if (!textFontPromise) {
     textFontPromise = PImage.registerFont(TEXT_FONT_PATH, "ZenxSans").load();
@@ -332,7 +422,7 @@ async function ensureTextFont() {
   await textFontPromise;
 }
 
-function drawTextBlock(
+async function drawTextBlock(
   ctx: ReturnType<ReturnType<typeof PImage.make>["getContext"]>,
   text: string,
   options: {
@@ -345,7 +435,7 @@ function drawTextBlock(
     weight?: "bold";
     align?: "left" | "center";
   }
-): void {
+): Promise<void> {
   const maxChars = Math.max(10, Math.floor(options.maxWidth / (options.fontSize * 0.52)));
   const lines = wrapText(text, maxChars, options.maxLines);
   if (lines.length === 0) return;
@@ -353,14 +443,14 @@ function drawTextBlock(
   ctx.fillStyle = "black";
   ctx.font = `${options.fontSize}pt ZenxSans`;
   ctx.textBaseline = "top";
-  lines.forEach((line, index) => {
-    const metrics = ctx.measureText(line);
+  for (const [index, line] of lines.entries()) {
+    const lineWidth = measureRichText(ctx, line, Math.round(options.fontSize * 1.05));
     const x =
       options.align === "center"
-        ? options.x + Math.max(0, (options.maxWidth - metrics.width) / 2)
+        ? options.x + Math.max(0, (options.maxWidth - lineWidth) / 2)
         : options.x;
-    ctx.fillText(line, x, options.y + index * options.lineHeight);
-  });
+    await drawRichText(ctx, line, x, options.y + index * options.lineHeight, options.fontSize);
+  }
 }
 
 async function createXStyleTextOverlay(item: BatchItem, profile: Profile, outputPath: string) {
@@ -372,7 +462,7 @@ async function createXStyleTextOverlay(item: BatchItem, profile: Profile, output
   const image = PImage.make(OUTPUT_WIDTH, OUTPUT_HEIGHT);
   const ctx = image.getContext("2d");
   ctx.clearRect(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
-  drawTextBlock(ctx, title, {
+  await drawTextBlock(ctx, title, {
     x: layout.title.x,
     y: layout.title.y,
     fontSize: layout.title.fontSize,
@@ -381,7 +471,7 @@ async function createXStyleTextOverlay(item: BatchItem, profile: Profile, output
     lineHeight: Math.round(layout.title.fontSize * 1.12),
     weight: "bold",
   });
-  drawTextBlock(ctx, item.manualOverrides.caption, {
+  await drawTextBlock(ctx, item.manualOverrides.caption, {
     x: layout.body.x,
     y: layout.body.y,
     fontSize: layout.body.fontSize,
