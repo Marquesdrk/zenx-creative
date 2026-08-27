@@ -169,7 +169,7 @@ export function createDefaultManualOverrides(
     trimStart: 0,
     trimEnd: null,
     volume: 1,
-    muted: true,
+    muted: false,
   };
 }
 

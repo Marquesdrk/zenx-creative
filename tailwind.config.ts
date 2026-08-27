@@ -14,7 +14,13 @@ const config: Config = {
         muted: "rgba(244,246,250,0.6)",
       },
       fontFamily: {
-        sans: ["var(--font-inter)", "sans-serif"],
+        sans: [
+          "var(--font-inter)",
+          "Apple Color Emoji",
+          "Segoe UI Emoji",
+          "Noto Color Emoji",
+          "sans-serif",
+        ],
       },
     },
   },
