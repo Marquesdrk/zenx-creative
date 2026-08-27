@@ -346,24 +346,41 @@ function isEmojiSegment(segment: string) {
   );
 }
 
-function emojiAssetCode(segment: string) {
+function emojiCodePoints(segment: string, options?: { omitVariationSelectors?: boolean }) {
   return Array.from(segment)
     .map((character) => character.codePointAt(0))
-    .filter((codePoint): codePoint is number => Boolean(codePoint) && codePoint !== 0xfe0f)
+    .filter(
+      (codePoint): codePoint is number =>
+        Boolean(codePoint) && (!options?.omitVariationSelectors || codePoint !== 0xfe0f)
+    );
+}
+
+function notoEmojiAssetCode(segment: string) {
+  return emojiCodePoints(segment)
+    .map((codePoint) => codePoint.toString(16))
+    .join("_");
+}
+
+function twemojiAssetCode(segment: string) {
+  return emojiCodePoints(segment, { omitVariationSelectors: true })
     .map((codePoint) => codePoint.toString(16))
     .join("-");
 }
 
 async function loadEmojiImage(segment: string) {
-  const code = emojiAssetCode(segment);
-  if (!code) return null;
-  const cached = emojiImageCache.get(code);
+  const notoCode = notoEmojiAssetCode(segment);
+  const twemojiCode = twemojiAssetCode(segment);
+  const cacheKey = notoCode || twemojiCode;
+  if (!cacheKey) return null;
+  const cached = emojiImageCache.get(cacheKey);
   if (cached) return cached;
 
   const promise = (async () => {
     const urls = [
-      `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/${code}.png`,
-      `https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/${code}.png`,
+      `https://cdn.jsdelivr.net/gh/googlefonts/noto-emoji@main/png/72/emoji_u${notoCode}.png`,
+      `https://raw.githubusercontent.com/googlefonts/noto-emoji/main/png/72/emoji_u${notoCode}.png`,
+      `https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/72x72/${twemojiCode}.png`,
+      `https://cdnjs.cloudflare.com/ajax/libs/twemoji/14.0.2/72x72/${twemojiCode}.png`,
     ];
     for (const url of urls) {
       try {
@@ -377,7 +394,7 @@ async function loadEmojiImage(segment: string) {
     return null;
   })();
 
-  emojiImageCache.set(code, promise);
+  emojiImageCache.set(cacheKey, promise);
   return promise;
 }
 
