@@ -5,13 +5,14 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#000000",
+        background: "#070709",
         foreground: "#F4F6FA",
-        card: "rgba(244,246,250,0.04)",
-        "card-hover": "rgba(244,246,250,0.08)",
-        border: "rgba(244,246,250,0.10)",
-        accent: "#1E3AFF",
-        muted: "rgba(244,246,250,0.6)",
+        card: "#0D0D10",
+        "card-hover": "#121217",
+        border: "rgba(255,255,255,0.08)",
+        accent: "#4F46FF",
+        "accent-2": "#6D28FF",
+        muted: "rgba(244,246,250,0.62)",
       },
       fontFamily: {
         sans: [

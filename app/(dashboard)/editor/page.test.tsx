@@ -9,10 +9,10 @@ describe("EditorPage", () => {
     expect(screen.getByRole("heading", { name: "Editor em massa" })).toBeInTheDocument();
     expect(
       screen.getByText(
-        "Importe vídeos em massa: o perfil escolhido já define engine, template, marca d'água e legenda automaticamente."
+        "Edite, personalize e prepare vários vídeos em lote com templates, legendas e IA."
       )
     ).toBeInTheDocument();
-    expect(screen.getByText(/Nenhum vídeo importado ainda/)).toBeInTheDocument();
+    expect(screen.getByText(/Nenhum lote encontrado/)).toBeInTheDocument();
   });
 
   it("opens the batch modal when '+ Novo lote' is clicked", async () => {

@@ -2,9 +2,13 @@
 
 import { upload } from "@vercel/blob/client";
 import { useEffect, useRef, useState } from "react";
+import { CalendarDays, CheckCircle2, Folder, Inbox, PlayCircle } from "lucide-react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { VideoGrid } from "@/components/editor/video-grid";
+import { Topbar } from "@/components/shell/topbar";
+import { PageHeader } from "@/components/ui/page-header";
+import { StatCard } from "@/components/ui/stat-card";
 import { createZipBlob, zipArchiveFilename, zipVideoFilename } from "@/lib/editor/client-zip";
 import { useProfiles } from "@/lib/editor/profiles-store";
 import { useTemplates } from "@/lib/editor/templates-store";
@@ -392,46 +396,38 @@ export default function EditorPage() {
 
   const completedItems = items.filter((i) => i.status === "COMPLETED");
   const awaitingReviewCount = items.filter((i) => i.status === "AWAITING_REVIEW").length;
+  const processingCount = items.filter((i) => i.status === "PROCESSING" || i.status === "ANALYZING").length;
 
   return (
     <div>
-      <div className="mb-1 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold text-foreground">Editor em massa</h1>
+      <Topbar
+        searchPlaceholder="Buscar vídeos..."
+        action={
         <button
           type="button"
           onClick={() => setBatchModalOpen(true)}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-background"
+          className="inline-flex h-10 items-center rounded-lg bg-gradient-to-r from-accent to-accent-2 px-4 text-sm font-semibold text-white shadow-[0_14px_35px_rgba(79,70,255,0.28)]"
         >
           + Novo lote
         </button>
-      </div>
-      <p className="text-sm text-muted">
-        Importe vídeos em massa: o perfil escolhido já define engine, template, marca d&apos;água e
-        legenda automaticamente.
-      </p>
-      <p className="mb-8 mt-1 text-xs text-muted">
-        O lote fica apenas nesta sessão do navegador durante a edição. Ao exportar, a Vercel
-        renderiza os vídeos, baixa um ZIP e remove o lote do editor.
-      </p>
+        }
+      />
+      <PageHeader
+        title="Editor em massa"
+        description="Edite, personalize e prepare vários vídeos em lote com templates, legendas e IA."
+      />
       {pageError && (
         <div className="mb-6 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200">
           {pageError}
         </div>
       )}
 
-      <div className="mb-6 grid grid-cols-3 gap-4">
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="text-xl font-bold text-foreground">{awaitingReviewCount}</div>
-          <div className="text-xs text-muted">aguardando revisão</div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="text-xl font-bold text-foreground">{completedItems.length}</div>
-          <div className="text-xs text-muted">renderizados</div>
-        </div>
-        <div className="rounded-xl border border-border bg-card p-4">
-          <div className="text-xl font-bold text-foreground">{batches.length}</div>
-          <div className="text-xs text-muted">lotes criados</div>
-        </div>
+      <div className="mb-6 mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <StatCard icon={Inbox} value={awaitingReviewCount} label="Aguardando revisão" />
+        <StatCard icon={PlayCircle} value={processingCount} label="Renderizando" tone="blue" />
+        <StatCard icon={CheckCircle2} value={completedItems.length} label="Concluídos" tone="green" />
+        <StatCard icon={CalendarDays} value={0} label="Agendados" tone="amber" />
+        <StatCard icon={Folder} value={batches.length} label="Lotes criados" />
       </div>
 
       <VideoGrid

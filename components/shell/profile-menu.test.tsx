@@ -7,7 +7,7 @@ describe("ProfileMenu", () => {
   it("shows the account name and plan, with the menu closed by default", () => {
     render(<ProfileMenu />);
     expect(screen.getByText("Zenx Creative")).toBeInTheDocument();
-    expect(screen.getByText("Uso pessoal")).toBeInTheDocument();
+    expect(screen.getByText("Plano Pro")).toBeInTheDocument();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 

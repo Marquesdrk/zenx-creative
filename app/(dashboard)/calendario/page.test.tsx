@@ -7,7 +7,7 @@ describe("CalendarioPage", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders the scheduler shell and empty states", () => {
+  it("renders the scheduler shell and empty states", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async (url: string) => {
@@ -22,12 +22,11 @@ describe("CalendarioPage", () => {
     );
 
     render(<CalendarioPage />);
-    expect(screen.getByRole("heading", { name: "Calendário de postagem" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Calendário" })).toBeInTheDocument();
     expect(
-      screen.getByText("Programe vídeos renderizados para Instagram Reels, Facebook e TikTok.")
+      screen.getByText("Visualize e gerencie todos os agendamentos de posts em um só lugar.")
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Rodar pendentes/ })).toBeInTheDocument();
-    expect(screen.getByText("Vídeos prontos para agendar")).toBeInTheDocument();
-    expect(screen.getByText("Nenhuma publicação agendada ainda.")).toBeInTheDocument();
+    expect(await screen.findByText("Nenhum post agendado para este período.")).toBeInTheDocument();
   });
 });

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { CircleUserRound, Settings, LogOut } from "lucide-react";
+import { ChevronUp, CircleUserRound, LogOut, Settings } from "lucide-react";
 
 export function ProfileMenu() {
   const [open, setOpen] = useState(false);
@@ -34,18 +34,19 @@ export function ProfileMenu() {
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-3 rounded-xl border border-border px-3 py-2 text-left hover:bg-card-hover"
+        className="flex w-full items-center gap-3 rounded-lg border border-border bg-card/70 px-3 py-2 text-left transition hover:bg-card-hover focus-visible:ring-2 focus-visible:ring-accent"
       >
-        <CircleUserRound size={28} className="text-accent" />
+        <CircleUserRound size={28} className="text-[#9B8CFF]" />
         <span className="flex flex-col">
           <span className="text-sm font-medium text-foreground">Zenx Creative</span>
-          <span className="text-xs text-muted">Uso pessoal</span>
+          <span className="text-xs text-muted">Plano Pro</span>
         </span>
+        <ChevronUp size={14} className="ml-auto text-muted" />
       </button>
       {open && (
         <div
           role="menu"
-          className="absolute bottom-full left-0 z-10 mb-2 w-full rounded-xl border border-border bg-[#141414] p-1 shadow-lg"
+          className="absolute bottom-full left-0 z-10 mb-2 w-full rounded-lg border border-border bg-[#101014] p-1 shadow-lg"
         >
           <Link
             href="/configuracoes"
