@@ -42,6 +42,12 @@ export function isMetaPublishMode(): boolean {
   return process.env.META_OAUTH_SCOPE_MODE === "publish" || Boolean(process.env.META_OAUTH_SCOPES?.trim());
 }
 
+/** Configuração criada em Facebook Login for Business. Na versão atual da Meta, ela define
+ *  as permissões permitidas e substitui o envio manual de `scope` no diálogo OAuth. */
+export function getMetaLoginConfigId(): string | null {
+  return process.env.META_LOGIN_CONFIG_ID?.trim() || null;
+}
+
 export function canDiscoverMetaAssets(): boolean {
   const scopes = getMetaOAuthScopes();
   return scopes.includes("pages_show_list") && scopes.includes("pages_read_engagement");

@@ -3,6 +3,7 @@ import {
   OAUTH_DIALOG_URL,
   getMetaAppId,
   getMetaAppSecret,
+  getMetaLoginConfigId,
   getMetaOAuthScopes,
   getMetaRedirectUri,
   isMetaPublishMode,
@@ -24,7 +25,13 @@ export function buildAuthorizationUrl(state: string, options: AuthorizationOptio
   url.searchParams.set("redirect_uri", getMetaRedirectUri());
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
-  url.searchParams.set("scope", getMetaOAuthScopes().join(","));
+  const configId = getMetaLoginConfigId();
+  if (configId) {
+    url.searchParams.set("config_id", configId);
+    url.searchParams.set("override_default_response_type", "true");
+  } else {
+    url.searchParams.set("scope", getMetaOAuthScopes().join(","));
+  }
   if (options.forceAccountSelection) {
     url.searchParams.set("auth_type", "reauthenticate");
   } else if (isMetaPublishMode()) {
