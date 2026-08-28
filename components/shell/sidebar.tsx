@@ -14,7 +14,7 @@ export function Sidebar({
   return (
     <aside className="sticky top-0 flex h-screen w-[248px] shrink-0 flex-col border-r border-border bg-[#09090B]/95 px-4 py-6">
       <div className="px-2 pb-8">
-        <Image src="/logo-zenx.png" alt="Zenx Creative" width={1254} height={1254} className="h-14 w-24 object-contain object-left" priority />
+        <Image src="/logo-zenx.png" alt="Zenx Creative" width={1254} height={1254} className="h-14 w-24 object-contain object-left" preload />
       </div>
       <nav className="flex flex-1 flex-col gap-1" aria-label="Navegação principal">
         {NAV_ITEMS.map((item) => (
