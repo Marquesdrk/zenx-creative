@@ -49,6 +49,9 @@ export function getMetaLoginConfigId(): string | null {
 }
 
 export function canDiscoverMetaAssets(): boolean {
+  // Login Configurations define the granted permissions inside Meta and therefore
+  // do not expose them through the legacy `scope` environment variable.
+  if (getMetaLoginConfigId()) return true;
   const scopes = getMetaOAuthScopes();
   return scopes.includes("pages_show_list") && scopes.includes("pages_read_engagement");
 }
