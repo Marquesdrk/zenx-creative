@@ -4,6 +4,7 @@ import { exchangeCodeForToken, exchangeForLongLivedToken, fetchAuthorizingMetaUs
 import { canDiscoverMetaAssets, getMetaDashboardBaseUrl } from "@/lib/server/meta/config";
 import { MetaGraphError, MetaNetworkError } from "@/lib/server/meta/graph-client";
 import { fetchManagedPages } from "@/lib/server/meta/pages";
+import { clearOAuthStateCookie, verifyOAuthStateCookie } from "@/lib/server/meta/oauth-state-cookie";
 
 /** Callback do OAuth da Meta. Sempre redireciona de volta pra /contas-meta — em caso de
  *  sucesso, com `?meta_session=<id>` (a tela busca os ativos descobertos em
@@ -26,9 +27,11 @@ export async function GET(request: Request) {
   }
   // Proteção CSRF: o state precisa existir, não ter expirado (10 min) e só pode ser usado uma
   // vez — consume() já apaga a linha ao validar.
-  if (!metaOAuthStateRepo.consume(state)) {
+  if (!metaOAuthStateRepo.consume(state) && !verifyOAuthStateCookie(request, state)) {
     redirectTo.searchParams.set("meta_error", "Sessão de login expirada ou inválida. Clique em Conectar Meta de novo.");
-    return NextResponse.redirect(redirectTo);
+    const response = NextResponse.redirect(redirectTo);
+    response.headers.append("Set-Cookie", clearOAuthStateCookie());
+    return response;
   }
 
   try {
@@ -68,5 +71,7 @@ export async function GET(request: Request) {
     redirectTo.searchParams.set("meta_error", message);
   }
 
-  return NextResponse.redirect(redirectTo);
+  const response = NextResponse.redirect(redirectTo);
+  response.headers.append("Set-Cookie", clearOAuthStateCookie());
+  return response;
 }

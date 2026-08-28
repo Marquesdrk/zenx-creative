@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { metaOAuthStateRepo } from "@/lib/server/db";
 import { buildAuthorizationUrl } from "@/lib/server/meta/auth";
 import { getMetaDashboardBaseUrl, isMetaConfigured } from "@/lib/server/meta/config";
+import { createOAuthStateCookie } from "@/lib/server/meta/oauth-state-cookie";
 
 /** Ponto de entrada do botão "Conectar Meta": identifica que há um pedido de login (o sistema
  *  é single-tenant hoje — ver docs/META_INTEGRATION_SETUP.md — então não há usuário para
@@ -20,7 +21,9 @@ export async function GET(request: Request) {
   metaOAuthStateRepo.cleanupExpired();
   const state = metaOAuthStateRepo.create();
   const url = new URL(request.url);
-  return NextResponse.redirect(
+  const response = NextResponse.redirect(
     buildAuthorizationUrl(state, { forceAccountSelection: url.searchParams.get("switch_account") === "1" })
   );
+  response.headers.append("Set-Cookie", createOAuthStateCookie(state));
+  return response;
 }
