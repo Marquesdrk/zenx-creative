@@ -149,7 +149,7 @@ function ContasMetaContent() {
         action={
           <a href="/api/meta/auth" className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent-2 px-4 text-sm font-semibold text-white">
             <Plus size={16} />
-            Conectar conta
+            Conectar Facebook
           </a>
         }
       />
@@ -288,7 +288,7 @@ function ContasMetaContent() {
           <AppCard>
             <div className="border-b border-border px-4 py-4 text-sm font-semibold text-foreground">Ações rápidas</div>
             <div className="p-2">
-              <a href="/api/meta/auth" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><PlatformIcon platform="INSTAGRAM" /><span className="text-sm font-semibold text-foreground">Conectar Instagram</span></a>
+              <a href="/api/meta/instagram/auth" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><PlatformIcon platform="INSTAGRAM" /><span className="text-sm font-semibold text-foreground">Conectar Instagram</span></a>
               <div className="flex items-center gap-3 rounded-lg p-3 text-muted"><PlatformIcon platform="TIKTOK" /><span className="text-sm font-semibold">Conectar TikTok</span></div>
               <a href="/api/meta/auth" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><PlatformIcon platform="FACEBOOK" /><span className="text-sm font-semibold text-foreground">Conectar Facebook</span></a>
               <a href="/configuracoes" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><AlertTriangle size={20} className="text-[#9B8CFF]" /><span className="text-sm font-semibold text-foreground">Gerenciar integrações</span></a>

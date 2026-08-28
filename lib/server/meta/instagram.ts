@@ -17,8 +17,9 @@ export async function createReelContainer(params: {
   accessToken: string;
   videoUrl: string;
   caption: string;
+  graphBase?: string;
 }): Promise<string> {
-  const url = graphUrl(GRAPH_BASE, `${params.instagramUserId}/media`, {});
+  const url = graphUrl(params.graphBase ?? GRAPH_BASE, `${params.instagramUserId}/media`, {});
   const data = await graphFetch<MediaContainerResponse>(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -32,8 +33,8 @@ export async function createReelContainer(params: {
   return data.id;
 }
 
-async function fetchContainerStatus(containerId: string, accessToken: string): Promise<ContainerStatus> {
-  const url = graphUrl(GRAPH_BASE, containerId, { fields: "status_code", access_token: accessToken });
+async function fetchContainerStatus(containerId: string, accessToken: string, graphBase = GRAPH_BASE): Promise<ContainerStatus> {
+  const url = graphUrl(graphBase, containerId, { fields: "status_code", access_token: accessToken });
   const data = await graphFetch<ContainerStatusResponse>(url);
   return data.status_code ?? "ERROR";
 }
@@ -45,13 +46,13 @@ async function fetchContainerStatus(containerId: string, accessToken: string): P
 export async function waitForContainerReady(
   containerId: string,
   accessToken: string,
-  opts: { maxAttempts?: number; intervalMs?: number } = {}
+  opts: { maxAttempts?: number; intervalMs?: number; graphBase?: string } = {}
 ): Promise<void> {
   const maxAttempts = opts.maxAttempts ?? 5;
   const intervalMs = opts.intervalMs ?? 60_000;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const status = await fetchContainerStatus(containerId, accessToken);
+    const status = await fetchContainerStatus(containerId, accessToken, opts.graphBase);
     if (status === "FINISHED" || status === "PUBLISHED") return;
     if (status === "ERROR") {
       throw new Error("O Instagram reportou erro ao processar o vídeo do Reel (status ERROR).");
@@ -73,8 +74,9 @@ export async function publishReelContainer(params: {
   instagramUserId: string;
   accessToken: string;
   creationId: string;
+  graphBase?: string;
 }): Promise<string> {
-  const url = graphUrl(GRAPH_BASE, `${params.instagramUserId}/media_publish`, {});
+  const url = graphUrl(params.graphBase ?? GRAPH_BASE, `${params.instagramUserId}/media_publish`, {});
   const data = await graphFetch<MediaPublishResponse>(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -93,10 +95,12 @@ export async function publishInstagramReel(params: {
   accessToken: string;
   videoUrl: string;
   caption: string;
+  graphBase?: string;
 }): Promise<PublishInstagramReelResult> {
-  const containerId = await createReelContainer(params);
+  const graphBase = params.graphBase ?? GRAPH_BASE;
+  const containerId = await createReelContainer({ ...params, graphBase });
   try {
-    await waitForContainerReady(containerId, params.accessToken);
+    await waitForContainerReady(containerId, params.accessToken, { graphBase });
   } catch (err) {
     // Contexto útil pro log/erro exibido na UI, sem perder a causa original.
     if (err instanceof MetaGraphError) throw err;
@@ -106,6 +110,7 @@ export async function publishInstagramReel(params: {
     instagramUserId: params.instagramUserId,
     accessToken: params.accessToken,
     creationId: containerId,
+    graphBase,
   });
   return { externalId: mediaId };
 }

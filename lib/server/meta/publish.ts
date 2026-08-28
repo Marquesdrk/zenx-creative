@@ -2,6 +2,7 @@ import { publicationLogsRepo, scheduledPostAccountsRepo, scheduledPostsRepo, soc
 import { publishFacebookReel } from "./facebook";
 import { MetaGraphError, MetaNetworkError } from "./graph-client";
 import { publishInstagramReel } from "./instagram";
+import { INSTAGRAM_GRAPH_BASE } from "./config";
 
 const MAX_ATTEMPTS = 5;
 const BACKOFF_BASE_MS = 60_000; // 1min, 2min, 4min, 8min, 16min
@@ -80,6 +81,7 @@ export async function processScheduledPostAccount(scheduledPostAccountId: string
       accessToken,
       instagramUserId: account.instagramUserId,
       pageId: account.pageId,
+      authFlow: typeof account.metadata.authFlow === "string" ? account.metadata.authFlow : undefined,
       videoUrl: post.videoUrl,
       caption: post.caption,
     });
@@ -176,6 +178,7 @@ async function publishToAccount(params: {
   accessToken: string;
   instagramUserId: string | null;
   pageId: string | null;
+  authFlow?: string;
   videoUrl: string;
   caption: string;
 }): Promise<string> {
@@ -186,6 +189,7 @@ async function publishToAccount(params: {
       accessToken: params.accessToken,
       videoUrl: params.videoUrl,
       caption: params.caption,
+      graphBase: params.authFlow === "instagram_login" ? INSTAGRAM_GRAPH_BASE : undefined,
     });
     return result.externalId;
   }

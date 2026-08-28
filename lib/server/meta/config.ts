@@ -9,6 +9,7 @@ export const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION?.trim() || "
 export const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 export const OAUTH_DIALOG_URL = `https://www.facebook.com/${GRAPH_API_VERSION}/dialog/oauth`;
 export const RUPLOAD_BASE = "https://rupload.facebook.com";
+export const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${process.env.META_INSTAGRAM_GRAPH_API_VERSION?.trim() || GRAPH_API_VERSION}`;
 
 const BASIC_META_OAUTH_SCOPES = ["public_profile"] as const;
 
@@ -78,6 +79,18 @@ export function getMetaAppSecret(): string {
 
 export function getMetaRedirectUri(): string {
   return required("META_REDIRECT_URI");
+}
+
+export function getInstagramAppId(): string {
+  return process.env.META_INSTAGRAM_APP_ID?.trim() || getMetaAppId();
+}
+
+export function getInstagramAppSecret(): string {
+  return process.env.META_INSTAGRAM_APP_SECRET?.trim() || getMetaAppSecret();
+}
+
+export function getInstagramRedirectUri(): string {
+  return process.env.META_INSTAGRAM_REDIRECT_URI?.trim() || getMetaRedirectUri().replace(/\/api\/meta\/callback\/?$/, "/api/meta/instagram/callback");
 }
 
 /** URL do painel para onde o navegador volta depois do OAuth.
