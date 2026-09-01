@@ -17,6 +17,7 @@ type BrandAccounts = {
   key: string;
   name: string;
   handle: string;
+  profilePictureUrl: string | null;
   instagram: PublicSocialAccount | null;
   facebook: PublicSocialAccount | null;
 };
@@ -55,14 +56,19 @@ function groupAccounts(accounts: PublicSocialAccount[]) {
         key,
         name: account.platform === "FACEBOOK" ? account.accountName : account.accountName || account.username || "Marca",
         handle: account.username ? `@${account.username.replace(/^@/, "")}` : "marca conectada",
+        profilePictureUrl: account.profilePictureUrl,
         instagram: null,
         facebook: null,
       } satisfies BrandAccounts);
-    if (account.platform === "INSTAGRAM") current.instagram = account;
+    if (account.platform === "INSTAGRAM") {
+      current.instagram = account;
+      current.profilePictureUrl = current.profilePictureUrl ?? account.profilePictureUrl;
+    }
     if (account.platform === "FACEBOOK") {
       current.facebook = account;
       current.name = account.accountName;
       current.handle = account.username ? `@${account.username.replace(/^@/, "")}` : current.handle;
+      current.profilePictureUrl = account.profilePictureUrl ?? current.profilePictureUrl;
     }
     map.set(key, current);
   }
@@ -213,9 +219,18 @@ function ContasMetaContent() {
               brandRows.map((brand) => (
                 <div key={brand.key} className="grid grid-cols-[1.1fr_1.8fr_260px] items-center gap-4 border-b border-border px-4 py-5 last:border-b-0">
                   <div className="flex min-w-0 items-center gap-3">
-                    <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-sm font-bold text-white">
-                      {initials(brand.name)}
-                    </span>
+                    {brand.profilePictureUrl ? (
+                      // eslint-disable-next-line @next/next/no-img-element -- avatar remoto da Meta, fora do domínio de imagens do Next
+                      <img
+                        src={brand.profilePictureUrl}
+                        alt=""
+                        className="h-11 w-11 shrink-0 rounded-full object-cover"
+                      />
+                    ) : (
+                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-sm font-bold text-white">
+                        {initials(brand.name)}
+                      </span>
+                    )}
                     <div className="min-w-0">
                       <p className="truncate text-sm font-semibold text-foreground">{brand.name}</p>
                       <p className="truncate text-xs text-muted">{brand.handle}</p>
