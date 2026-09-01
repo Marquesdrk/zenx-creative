@@ -2,10 +2,13 @@ import { google } from "googleapis";
 import { Readable } from "node:stream";
 import { googleDriveTokensRepo, type GoogleDriveTokens } from "@/lib/server/google/drive-tokens-db";
 
-// O mesmo consentimento também autoriza upload no YouTube (lib/server/publishing/youtube.ts),
-// evitando um segundo fluxo de OAuth só para isso. Tokens vivem no Supabase (ver
+// Só o escopo do Drive: a Google bloqueia combinar youtube.upload com outros escopos no mesmo
+// consentimento ("This request contains scopes that cannot be requested together") — APIs como o
+// YouTube exigem uma autorização OAuth separada e dedicada. Se algum dia o upload direto pro
+// YouTube (lib/server/publishing/youtube.ts) precisar funcionar de verdade, ele precisa do
+// próprio fluxo de conexão/token, não pode reaproveitar este. Tokens vivem no Supabase (ver
 // lib/server/google/drive-tokens-db.ts) — precisam sobreviver a cold starts na Vercel.
-const SCOPES = ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/youtube.upload"];
+const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
 const ROOT_FOLDER_NAME = "Zenx Creative - Agendados";
 
 /** Credenciais de um app OAuth do Google Cloud (Desktop ou Web), com a Drive API habilitada.

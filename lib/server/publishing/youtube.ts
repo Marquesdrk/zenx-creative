@@ -3,8 +3,10 @@ import { google } from "googleapis";
 import { getGoogleAuthClient, isDriveConfigured } from "@/lib/server/google-drive";
 import type { FetchedMetrics, PlatformAdapter, PublishInput, PublishResult } from "./types";
 
-/** Reaproveita a mesma conexão Google usada pelo Drive (lib/server/google-drive.ts) — o
- *  escopo youtube.upload já é pedido no mesmo consentimento, com o token persistido no Supabase. */
+/** Reaproveita o cliente OAuth do Drive (lib/server/google-drive.ts), mas o token dele só tem o
+ *  escopo drive.file — a Google não deixa pedir youtube.upload junto no mesmo consentimento.
+ *  Enquanto não houver um fluxo de conexão próprio para o YouTube, uploads aqui vão falhar com
+ *  "insufficient scope"; este adapter fica desabilitado na prática até isso ser resolvido. */
 async function getAuthedClient() {
   if (!isDriveConfigured()) return null;
   return getGoogleAuthClient();

@@ -143,7 +143,7 @@ scheduled_posts
   id, user_id, video_url (null se video_source='drive'), video_source ('url'|'drive'),
   drive_file_id, drive_file_name, caption, scheduled_at, status, created_at, updated_at
 
-google_drive_tokens       -- token OAuth do Google (Drive + YouTube), linha única (id=1) —
+google_drive_tokens       -- token OAuth do Google (escopo drive.file), linha única (id=1) —
                           -- ver seção 3.1
 
 scheduled_post_accounts   -- 1 linha por destino: 1 vídeo → N contas, status independente
@@ -195,10 +195,12 @@ validade), que aponta para `GET /api/drive/stream/[fileId]`
 do servidor e repassa os bytes via streaming — o vídeo nunca é duplicado em outro storage, só
 "passa" pelo servidor no momento exato da publicação. Ver `lib/server/meta/video-source.ts`.
 
-**Configuração** (reaproveita o mesmo app OAuth do Google já usado pelo upload de YouTube —
-ver `.env.local.example`):
+**Configuração** (ver `.env.local.example`):
 1. `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` — um app OAuth do Google
-   Cloud com a Drive API habilitada.
+   Cloud com a Drive API habilitada, pedindo **só** o escopo `drive.file`. A Google bloqueia
+   combinar `youtube.upload` com outros escopos no mesmo consentimento ("scopes that cannot be
+   requested together") — por isso o upload legado pro YouTube
+   (`lib/server/publishing/youtube.ts`) não funciona de fato através dessa conexão hoje.
 2. `DRIVE_STREAM_SECRET` — assina as URLs do passo acima. Gere com `openssl rand -hex 24`.
 3. `PUBLIC_BASE_URL` — precisa apontar pro domínio público de produção (a Meta busca o vídeo
    nesse domínio).
