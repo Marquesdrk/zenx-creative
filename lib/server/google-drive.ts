@@ -112,35 +112,51 @@ async function ensureFolder(
   return id;
 }
 
-/** Garante a estrutura "Zenx Creative - Agendados/@usuario" e devolve o id da subpasta —
- *  organiza os vídeos agendados por conta do Instagram dentro do Drive do usuário. */
-async function ensureAccountFolder(client: InstanceType<typeof google.auth.OAuth2>, username: string): Promise<string> {
-  const drive = google.drive({ version: "v3", auth: client });
-  const rootId = await ensureFolder(drive, ROOT_FOLDER_NAME, null);
-  const accountFolderName = `@${username.replace(/^@/, "")}`;
-  return ensureFolder(drive, accountFolderName, rootId);
+/** Garante uma cadeia de subpastas (ex.: ["Avatares Criados", "Guto"]) a partir da raiz do
+ *  Drive e devolve o id da última — cada segmento é criado só se ainda não existir. */
+async function ensureNestedFolder(drive: ReturnType<typeof google.drive>, segments: string[]): Promise<string> {
+  let parentId: string | null = null;
+  for (const segment of segments) {
+    parentId = await ensureFolder(drive, segment, parentId);
+  }
+  if (!parentId) throw new Error("ensureNestedFolder chamado sem segmentos.");
+  return parentId;
 }
 
-/** Sobe um vídeo agendado para a pasta da conta no Drive (criando-a se preciso) e devolve o
- *  fileId — esse é o único dado persistido (scheduled_posts.drive_file_id); o arquivo nunca é
- *  duplicado em outro storage. */
-export async function uploadScheduledVideoToDrive(
+/** Sobe um arquivo qualquer para uma cadeia de pastas do Drive (criando-a se preciso) e
+ *  devolve o fileId — usado tanto pelos vídeos agendados quanto pelos documentos/imagens do
+ *  Criador de Avatar (lib/server/avatar-pipeline.ts). Nunca duplica o arquivo em outro storage. */
+export async function uploadFileToDriveFolder(
   fileBuffer: Buffer,
   filename: string,
   mimeType: string,
-  instagramUsername: string
-): Promise<{ fileId: string; fileName: string }> {
+  folderSegments: string[]
+): Promise<{ fileId: string; fileName: string; folderId: string }> {
   const client = await getOAuthClient();
-  if (!client) throw new Error("Google Drive não conectado — conecte em Configurações antes de enviar vídeos.");
+  if (!client) throw new Error("Google Drive não conectado — conecte em Configurações antes de enviar arquivos.");
   const drive = google.drive({ version: "v3", auth: client });
-  const folderId = await ensureAccountFolder(client, instagramUsername);
+  const folderId = await ensureNestedFolder(drive, folderSegments);
   const res = await drive.files.create({
     requestBody: { name: filename, parents: [folderId] },
     media: { mimeType, body: Readable.from(fileBuffer) },
     fields: "id, name",
   });
   if (!res.data.id) throw new Error("O Google Drive não retornou um ID de arquivo após o upload.");
-  return { fileId: res.data.id, fileName: res.data.name ?? filename };
+  return { fileId: res.data.id, fileName: res.data.name ?? filename, folderId };
+}
+
+/** Sobe um vídeo agendado para "Zenx Creative - Agendados/@conta" no Drive — esse é o único
+ *  dado persistido (scheduled_posts.drive_file_id); o arquivo nunca é duplicado em outro storage. */
+export async function uploadScheduledVideoToDrive(
+  fileBuffer: Buffer,
+  filename: string,
+  mimeType: string,
+  instagramUsername: string
+): Promise<{ fileId: string; fileName: string }> {
+  return uploadFileToDriveFolder(fileBuffer, filename, mimeType, [
+    ROOT_FOLDER_NAME,
+    `@${instagramUsername.replace(/^@/, "")}`,
+  ]);
 }
 
 export type DriveFileStream = {

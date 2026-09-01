@@ -28,7 +28,7 @@ export function Sidebar({
           <Zap size={18} className="text-[#9B8CFF]" />
           <p className="mt-4 text-sm font-semibold text-[#A99DFF]">Dica de produtividade</p>
           <p className="mt-3 text-xs leading-5 text-[#BEB7FF]">Use templates para agilizar ainda mais seu processo.</p>
-          <a href="/configuracoes" className="mt-4 inline-flex rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white">
+          <a href="/templates" className="mt-4 inline-flex rounded-lg bg-accent px-4 py-2 text-xs font-semibold text-white">
             Ver templates
           </a>
         </div>

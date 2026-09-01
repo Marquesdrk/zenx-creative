@@ -1,4 +1,4 @@
-import { CriadorAvatarSkeleton } from "@/components/skeletons/criador-avatar-skeleton";
+import { AvatarCreator } from "@/components/avatar/avatar-creator";
 
 export default function CriadorAvatarPage() {
   return (
@@ -7,7 +7,7 @@ export default function CriadorAvatarPage() {
       <p className="mb-8 mt-1 text-sm text-muted">
         Construa influenciadores virtuais completos, do zero ao publicado.
       </p>
-      <CriadorAvatarSkeleton />
+      <AvatarCreator />
     </div>
   );
 }
