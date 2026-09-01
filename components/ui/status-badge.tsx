@@ -30,7 +30,7 @@ export function StatusBadge({
 }) {
   const Icon = pulse ? Radio : ICONS[tone];
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${TONES[tone]}`}>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold ${TONES[tone]}`}>
       <Icon size={13} className={tone === "working" ? "animate-spin" : undefined} />
       {children}
     </span>

@@ -84,17 +84,17 @@ function AccountSlot({
 }) {
   const status = account?.status ?? "disconnected";
   return (
-    <div className="rounded-lg border border-border bg-[#101014] p-3">
-      <div className="flex items-center gap-3">
+    <div className="min-w-0 rounded-lg border border-border bg-[#101014] p-2.5">
+      <div className="flex min-w-0 items-center gap-2">
         <PlatformIcon platform={platform} />
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">{platform === "INSTAGRAM" ? "Instagram" : platform === "FACEBOOK" ? "Facebook" : "TikTok"}</p>
+          <p className="truncate text-sm font-semibold text-foreground">{platform === "INSTAGRAM" ? "Instagram" : platform === "FACEBOOK" ? "Facebook" : "TikTok"}</p>
           <p className="truncate text-xs text-muted">
             {account?.username ? `@${account.username.replace(/^@/, "")}` : account ? account.accountName : "Não conectado"}
           </p>
         </div>
       </div>
-      <div className="mt-3">
+      <div className="mt-2.5">
         <StatusBadge tone={connectionTone(status)}>{connectionLabel(status)}</StatusBadge>
       </div>
     </div>
@@ -203,7 +203,7 @@ function ContasMetaContent() {
           </div>
 
           <AppCard className="overflow-hidden">
-            <div className="grid grid-cols-[1.1fr_1.8fr_260px] border-b border-border px-4 py-3 text-[11px] font-semibold uppercase text-muted">
+            <div className="grid grid-cols-[minmax(160px,1fr)_minmax(0,2.2fr)_auto] gap-4 border-b border-border px-4 py-3 text-[11px] font-semibold uppercase text-muted">
               <span>Marca</span>
               <span>Contas conectadas</span>
               <span className="text-right">Ações</span>
@@ -217,7 +217,7 @@ function ContasMetaContent() {
               </div>
             ) : (
               brandRows.map((brand) => (
-                <div key={brand.key} className="grid grid-cols-[1.1fr_1.8fr_260px] items-center gap-4 border-b border-border px-4 py-5 last:border-b-0">
+                <div key={brand.key} className="grid grid-cols-[minmax(160px,1fr)_minmax(0,2.2fr)_auto] items-center gap-4 border-b border-border px-4 py-5 last:border-b-0">
                   <div className="flex min-w-0 items-center gap-3">
                     {brand.profilePictureUrl ? (
                       // eslint-disable-next-line @next/next/no-img-element -- avatar remoto da Meta, fora do domínio de imagens do Next
@@ -237,19 +237,24 @@ function ContasMetaContent() {
                       {brand.key === brandRows[0]?.key && <span className="mt-2 inline-flex rounded-full bg-accent/20 px-2 py-1 text-[11px] font-semibold text-[#B8B0FF]">Marca principal</span>}
                     </div>
                   </div>
-                  <div className="grid gap-3 xl:grid-cols-3">
+                  <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-3">
                     <AccountSlot platform="INSTAGRAM" account={brand.instagram} />
                     <AccountSlot platform="TIKTOK" />
                     <AccountSlot platform="FACEBOOK" account={brand.facebook} />
                   </div>
-                  <div className="flex flex-wrap justify-end gap-2">
-                    <a href="/api/meta/auth?switch_account=1" className="inline-flex h-9 items-center rounded-lg border border-border bg-[#101014] px-4 text-sm font-semibold text-foreground hover:bg-card-hover">Gerenciar</a>
+                  <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
+                    <a
+                      href="/api/meta/auth?switch_account=1"
+                      className="inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-lg border border-border bg-[#101014] px-4 text-sm font-semibold text-foreground hover:bg-card-hover"
+                    >
+                      Gerenciar
+                    </a>
                     {(brand.instagram || brand.facebook) && (
                       <button
                         type="button"
                         onClick={() => setDiagnosticsAccountId((brand.instagram ?? brand.facebook)?.id ?? "")}
                         aria-label={`Diagnóstico de ${brand.name}`}
-                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-card-hover hover:text-foreground"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-card-hover hover:text-foreground"
                         title="Diagnóstico da conexão"
                       >
                         <Stethoscope size={14} />
@@ -261,12 +266,16 @@ function ContasMetaContent() {
                         onClick={() => handleDisconnect((brand.instagram ?? brand.facebook)?.id ?? "")}
                         disabled={busyId === (brand.instagram ?? brand.facebook)?.id}
                         aria-label={`Desconectar ${brand.name}`}
-                        className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-red-500/15 hover:text-red-300 disabled:opacity-40"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-red-500/15 hover:text-red-300 disabled:opacity-40"
                       >
                         <Unlink size={14} />
                       </button>
                     )}
-                    <button type="button" aria-label={`Mais ações para ${brand.name}`} className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-card-hover">
+                    <button
+                      type="button"
+                      aria-label={`Mais ações para ${brand.name}`}
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-card-hover"
+                    >
                       <MoreVertical size={15} />
                     </button>
                   </div>

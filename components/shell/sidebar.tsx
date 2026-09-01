@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Zap } from "lucide-react";
 import { NAV_ITEMS } from "./nav-items";
 import { SidebarNavItem } from "./sidebar-nav-item";
+import { StorageWidget } from "./storage-widget";
 
 export function Sidebar({
   activeHref,
@@ -22,19 +23,7 @@ export function Sidebar({
         ))}
       </nav>
       <div className="mt-auto space-y-4 pt-4">
-        <div className="rounded-lg border border-border bg-card/70 p-4">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-foreground">Armazenamento</span>
-            <span className="text-muted">45%</span>
-          </div>
-          <div className="mt-3 h-2 overflow-hidden rounded-full bg-white/[0.06]">
-            <div className="h-full w-[45%] rounded-full bg-gradient-to-r from-accent to-accent-2" />
-          </div>
-          <div className="mt-3 flex justify-between text-[11px] text-muted">
-            <span>45% utilizado</span>
-            <span>22.5 GB / 50 GB</span>
-          </div>
-        </div>
+        <StorageWidget />
         <div className="rounded-lg border border-accent/25 bg-gradient-to-br from-accent/20 to-accent-2/10 p-4">
           <Zap size={18} className="text-[#9B8CFF]" />
           <p className="mt-4 text-sm font-semibold text-[#A99DFF]">Dica de produtividade</p>
