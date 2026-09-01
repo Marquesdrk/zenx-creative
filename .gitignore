@@ -1,0 +1,17 @@
+node_modules/
+.next/
+.superpowers/
+.worktrees/
+*.log
+.env
+.env.local
+*.tsbuildinfo
+/data/
+/public/uploads/
+/public/renders/
+/public/batch-space/
+.vercel
+.claude/settings.local.json
+/_to_delete/
+
+.env*

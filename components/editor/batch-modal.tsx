@@ -1,0 +1,183 @@
+"use client";
+
+import { useRef, useState } from "react";
+import { X } from "lucide-react";
+import { ProfilePicker } from "./profile-picker";
+import { VideoFrame } from "./video-frame";
+import { MOCK_DRIVE_FILES } from "@/lib/editor/mock-profiles";
+import { ENGINE_LABELS, type Profile } from "@/lib/editor/types";
+
+type Source = "upload" | "drive";
+
+/** `file` é o objeto real (será enviado ao servidor por quem trata o submit); null para
+ *  arquivos do Google Drive mockado, que não têm conteúdo de verdade. */
+export type BatchSourceFile = { name: string; file: File | null };
+
+export function BatchModal({
+  profiles,
+  onClose,
+  onSubmit,
+}: {
+  profiles: Profile[];
+  onClose: () => void;
+  onSubmit: (params: { profileId: string; files: BatchSourceFile[] }) => void;
+}) {
+  const [source, setSource] = useState<Source>("upload");
+  const [uploadedFiles, setUploadedFiles] = useState<File[]>([]);
+  const [driveConnected, setDriveConnected] = useState(false);
+  const [selectedDriveFiles, setSelectedDriveFiles] = useState<string[]>([]);
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fileCount = source === "upload" ? uploadedFiles.length : selectedDriveFiles.length;
+  const selectedProfile = profiles.find((p) => p.id === profileId) ?? null;
+  const canSubmit = fileCount > 0 && selectedProfile !== null;
+
+  function toggleDriveFile(name: string) {
+    setSelectedDriveFiles((current) =>
+      current.includes(name) ? current.filter((f) => f !== name) : [...current, name]
+    );
+  }
+
+  function handleSubmit() {
+    if (!canSubmit || !selectedProfile) return;
+    const files: BatchSourceFile[] =
+      source === "upload"
+        ? uploadedFiles.map((file) => ({ name: file.name, file }))
+        : selectedDriveFiles.map((name) => ({ name, file: null }));
+    onSubmit({ profileId: selectedProfile.id, files });
+  }
+
+  return (
+    <div className="fixed inset-0 z-20 flex items-center justify-center bg-black/60 p-6">
+      <div className="flex max-h-[85vh] w-[640px] flex-col gap-5 overflow-y-auto rounded-2xl border border-border bg-[#101010] p-6">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground">Novo lote</h2>
+          <button
+            type="button"
+            aria-label="Fechar"
+            onClick={onClose}
+            className="rounded-lg p-1 text-gray-400 hover:bg-card-hover hover:text-foreground"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Fonte</p>
+          <div className="mb-3 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setSource("upload")}
+              className={`rounded-lg px-3 py-1.5 text-sm ${
+                source === "upload" ? "bg-accent text-background" : "bg-card text-gray-300"
+              }`}
+            >
+              Enviar arquivos
+            </button>
+            <button
+              type="button"
+              onClick={() => setSource("drive")}
+              className={`rounded-lg px-3 py-1.5 text-sm ${
+                source === "drive" ? "bg-accent text-background" : "bg-card text-gray-300"
+              }`}
+            >
+              Google Drive
+            </button>
+          </div>
+
+          {source === "upload" && (
+            <div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept="video/*"
+                className="hidden"
+                onChange={(event) => {
+                  setUploadedFiles(Array.from(event.target.files ?? []));
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full rounded-xl border border-dashed border-border py-6 text-sm text-muted hover:border-accent hover:text-foreground"
+              >
+                {uploadedFiles.length > 0
+                  ? `${uploadedFiles.length} arquivo(s) selecionado(s)`
+                  : "Clique para selecionar vídeos"}
+              </button>
+            </div>
+          )}
+
+          {source === "drive" && (
+            <div>
+              {!driveConnected ? (
+                <button
+                  type="button"
+                  onClick={() => setDriveConnected(true)}
+                  className="w-full rounded-xl border border-border bg-card py-2 text-sm text-foreground hover:bg-card-hover"
+                >
+                  Conectar Google Drive
+                </button>
+              ) : (
+                <div>
+                  <p className="mb-2 text-xs text-muted">
+                    Conectado: <span className="text-foreground">Meus Vídeos/Instagram</span>
+                  </p>
+                  <div className="flex flex-col gap-1">
+                    {MOCK_DRIVE_FILES.map((name) => (
+                      <label
+                        key={name}
+                        className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm text-gray-200"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedDriveFiles.includes(name)}
+                          onChange={() => toggleDriveFile(name)}
+                          className="accent-accent"
+                        />
+                        {name}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-5">
+          <div className="flex-1">
+            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+              Perfil (define engine e template automaticamente)
+            </p>
+            <ProfilePicker profiles={profiles} value={profileId} onChange={setProfileId} />
+          </div>
+
+          {selectedProfile && (
+            <div className="w-[140px] shrink-0">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                Prévia — {ENGINE_LABELS[selectedProfile.engine]}
+              </p>
+              <VideoFrame
+                profile={selectedProfile}
+                title={selectedProfile.engine === "X_STYLE" ? selectedProfile.defaultTitle : undefined}
+                caption="Legenda de exemplo"
+              />
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          disabled={!canSubmit}
+          onClick={handleSubmit}
+          className="mt-2 rounded-lg bg-accent py-2.5 text-sm font-semibold text-background disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Importar
+        </button>
+      </div>
+    </div>
+  );
+}

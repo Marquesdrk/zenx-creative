@@ -1,0 +1,26 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+
+body {
+  background:
+    radial-gradient(circle at 18% -10%, rgba(79, 70, 255, 0.12), transparent 30rem),
+    radial-gradient(circle at 92% 10%, rgba(109, 40, 255, 0.08), transparent 34rem),
+    #070709;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  outline-color: rgba(79, 70, 255, 0.9);
+}
