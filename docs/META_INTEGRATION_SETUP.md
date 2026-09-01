@@ -5,6 +5,12 @@ para ~30-100 contas) através de **1 único app da Meta**, via OAuth — cada co
 próprio token, guardado criptografado, isolado das demais. Publica Reels no Instagram e Facebook,
 com agendamento multi-destino (1 vídeo → N contas, status independente por conta).
 
+**Fluxo principal: "Conectar Instagram" (Instagram API with Instagram Login)** — conecta a conta
+profissional do Instagram diretamente (`instagram.com/oauth/authorize`), **sem exigir Página do
+Facebook**. É o caminho certo pra maioria das contas de clientes, que muitas vezes não têm (nem
+precisam ter) uma Página administrada. "Conectar Facebook" continua disponível como alternativa
+para contas que já operam via Página (ganha métricas/recursos adicionais de Business Manager).
+
 > **Importante sobre a arquitetura real deste projeto**: o projeto é **Next.js 16 (App Router)
 > self-hosted, sem nenhum sistema de login** — é uma ferramenta de operador único (você/sua
 > equipe), não um SaaS multi-usuário. Supabase Edge Functions → Route Handlers do Next.js
@@ -48,6 +54,8 @@ API)":
 | `META_OAUTH_SCOPE_MODE` | Não (default: modo básico) | `publish` pede o conjunto completo de permissões (Páginas + Instagram + publicação, seção 11). Deixe sem definir (ou qualquer outro valor) para pedir só `public_profile` — útil pra validar o OAuth num app recém-criado, antes da Meta liberar Páginas/Instagram para ele. Ver "Estratégia de dois estágios" logo abaixo. |
 | `META_OAUTH_SCOPES` | Não | Lista de escopos separada por vírgula, para sobrepor manualmente tanto o modo básico quanto o `publish` (ex.: testar um subconjunto específico de permissões). Se definida, tem prioridade sobre `META_OAUTH_SCOPE_MODE`. |
 | `META_DASHBOARD_BASE_URL` | Não (default: origem da própria requisição em produção; `http://127.0.0.1:PORT` em dev) | Para onde o navegador é redirecionado de volta depois do OAuth. Necessária quando o callback chega por uma URL pública (ex.: túnel ngrok) mas você abre o painel pelo `localhost` — sem isso, o redirect final tentaria voltar para a URL do túnel em vez do painel local. |
+| `META_INSTAGRAM_APP_ID` / `META_INSTAGRAM_APP_SECRET` / `META_INSTAGRAM_REDIRECT_URI` | Não | Só necessárias se o produto "Instagram" (Instagram Login) estiver configurado num app da Meta separado do usado pra `META_APP_ID`. Caem no app principal quando vazias — um único app cobrindo os dois produtos funciona normalmente. |
+| `CRON_SECRET` | Recomendado em produção | Protege `POST/GET /api/scheduled-posts/run-due`. Gere com `openssl rand -hex 24`. Ver seção 8. |
 | `SUPABASE_URL` | Sim | URL do projeto Supabase que guarda as tabelas da integração (ver seção 3). |
 | `SUPABASE_SERVICE_ROLE_KEY` | Sim | Service role key — nunca sai do servidor (`lib/server/supabase-admin.ts`), nunca é enviada ao frontend. |
 
@@ -192,9 +200,15 @@ lib/server/meta/
                                  META_INSTAGRAM_ACCOUNT_FOUND, META_ACCOUNT_SAVED,
                                  META_CONNECTION_VALIDATED, META_MEDIA_CONTAINER_CREATED,
                                  META_MEDIA_PROCESSING, META_MEDIA_PUBLISHED, META_API_ERROR
-  auth.ts        (meta-auth)  — URL de login, troca code→token, token curto→longo
-  pages.ts       (meta-pages) — lista Páginas + Instagram vinculado (/me/accounts)
-  instagram.ts   (meta-instagram) — container → poll status → media_publish
+  auth.ts        (meta-auth)  — fluxo "Conectar Facebook": URL de login, troca code→token,
+                                 token curto→longo, via Página do Facebook
+  instagram-auth.ts           — fluxo "Conectar Instagram" (PRINCIPAL): URL de login direto
+                                 no Instagram, troca code→token, refresh de token de longa
+                                 duração (ig_refresh_token) — não depende de Página nenhuma
+  pages.ts       (meta-pages) — lista Páginas + Instagram vinculado (/me/accounts) — só usado
+                                 pelo fluxo "Conectar Facebook"
+  instagram.ts   (meta-instagram) — container → poll status → media_publish (comum aos dois
+                                 fluxos de conexão do Instagram)
   facebook.ts    (meta-facebook)  — video_reels: start → transfer (por URL) → finish
   publish.ts     (meta-publish)   — orquestra 1 destino: claim atômico, chama o adapter
                                      certo, grava resultado/erro/retry, nunca deixa uma
@@ -205,7 +219,13 @@ lib/server/meta/
   types.ts                    — todos os tipos de domínio + tipos de resposta da Graph API
 
 app/api/meta/
-  auth/route.ts                       — GET: gera state, redireciona pro diálogo OAuth
+  instagram/auth/route.ts             — GET: fluxo PRINCIPAL "Conectar Instagram" — gera
+                                         state, redireciona pro diálogo OAuth do Instagram
+  instagram/callback/route.ts         — GET: troca token, busca perfil, já salva a conta
+                                         direto (sem etapa de seleção — não há Páginas a
+                                         escolher, a própria conta autorizada é o ativo)
+  auth/route.ts                       — GET: fluxo alternativo "Conectar Facebook" — gera
+                                         state, redireciona pro diálogo OAuth da Meta
   callback/route.ts                   — GET: valida state, troca token, descobre Páginas/IG,
                                          guarda numa sessão de descoberta, redireciona com
                                          ?meta_session=
@@ -234,12 +254,14 @@ components/meta/connection-diagnostics-modal.tsx — modal "Diagnóstico da cone
 components/meta/*                     — demais componentes dessas telas
 ```
 
-> Removido nesta revisão: o fluxo paralelo "Instagram API with Instagram Login"
-> (`lib/server/meta/instagram-auth.ts` + `/api/meta/instagram/auth|callback`) — ele conectava
-> uma conta Instagram sem vínculo com Página do Facebook, o que não atende o requisito de
-> múltiplas contas geridas via Página/Business Manager (o único caminho da Meta hoje para gerir
-> 30-100 contas de terceiros). O único fluxo suportado agora é Facebook Login for Business →
-> Página → Instagram Business Account vinculado, via **Conectar Facebook**.
+> Os dois fluxos de conexão são oficiais e coexistem por design: **"Conectar Instagram"**
+> (`lib/server/meta/instagram-auth.ts` + `/api/meta/instagram/auth|callback`) é o caminho
+> principal — não exige Página do Facebook, ideal pra maioria das contas de clientes.
+> **"Conectar Facebook"** (via Página) continua disponível pra quem já opera assim e quer os
+> recursos extras de Business Manager (insights agregados, gerenciar Página e Instagram do
+> mesmo lugar). Ambos salvam em `social_accounts` com `platform = 'INSTAGRAM'`; o campo
+> `metadata.authFlow` (`"instagram_login"` ou ausente/Página) diferencia qual host da Graph API
+> usar em cada publicação — ver `lib/server/meta/publish.ts`.
 
 ## 5. Como testar localmente
 
@@ -303,15 +325,26 @@ seção 8) encontrá-lo como "due" e processar.
 
 `POST /api/scheduled-posts/run-due` processa tudo que está pendente e "vencido" (agendado pra
 agora/antes, ou um retry cujo `next_attempt_at` já passou). Ele **não roda sozinho** — precisa ser
-chamado periodicamente. Embora o banco agora seja Supabase Postgres, isso ainda não usa
-"Supabase Cron/Edge Functions" (o processamento roda no Next.js self-hosted, não em Supabase) —
-escolha uma destas opções:
+chamado periodicamente. Também aceita **GET** (alias do POST) especificamente porque o Vercel
+Cron Jobs só dispara requisições GET.
 
-- **Cron do sistema operacional** (VPS próprio): `* * * * * curl -X POST https://SEU_DOMINIO/api/scheduled-posts/run-due`
-  a cada minuto.
-- **Serviço de ping externo** (cron-job.org, EasyCron, etc.) apontando pra essa URL.
-- **Vercel Cron / plataforma equivalente**, se decidir migrar o deploy pra lá.
-- Manualmente, pelo botão **"Rodar pendentes"** na tela Publicar (útil em desenvolvimento).
+**Já vem configurado** um Cron Job da própria Vercel em [`vercel.json`](../vercel.json)
+(`0 3 * * *` — todo dia às 3h UTC). **Importante sobre o plano Hobby**: a Vercel só permite
+crons **1x por dia** no plano Hobby — qualquer coisa mais frequente exige plano Pro. Isso
+significa que, no Hobby, um post agendado pra "hoje às 14h" só é efetivamente publicado na
+próxima janela do cron (pode levar até ~24h de atraso). Duas opções pra publicação em horário
+preciso sem precisar upgrade:
+
+- **Serviço de ping externo gratuito** (ex. [cron-job.org](https://cron-job.org)) chamando
+  `POST https://SEU_DOMINIO/api/scheduled-posts/run-due` a cada 1-5 minutos — não depende do
+  plano da Vercel, é só uma chamada HTTP de fora.
+- **Upgrade pra Vercel Pro** e reduzir o `schedule` do `vercel.json` (ex. `*/5 * * * *`).
+
+Endpoint protegido por `CRON_SECRET` (opcional, recomendado): se definida, só aceita chamadas
+com `Authorization: Bearer <CRON_SECRET>` — a própria Vercel Cron Job já envia esse header
+sozinha quando a env var existe; um serviço de ping externo precisa ser configurado pra mandar
+esse header manualmente (ou deixe `CRON_SECRET` em branco pra abrir o endpoint, já que ele é
+idempotente e seguro de chamar repetido).
 
 Processa até 5 destinos em paralelo por rodada (`lib/server/scheduler.ts`, `CONCURRENCY`), pra não
 sobrecarregar a Graph API com 30-100 contas. Cada destino é reivindicado atomicamente

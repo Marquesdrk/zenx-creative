@@ -149,9 +149,9 @@ function ContasMetaContent() {
       <Topbar
         searchPlaceholder="Buscar contas..."
         action={
-          <a href="/api/meta/auth" className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent-2 px-4 text-sm font-semibold text-white">
+          <a href="/api/meta/instagram/auth" className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent-2 px-4 text-sm font-semibold text-white">
             <Plus size={16} />
-            Conectar Facebook
+            Conectar Instagram
           </a>
         }
       />

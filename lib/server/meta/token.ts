@@ -1,5 +1,5 @@
 import { socialAccountsRepo } from "@/lib/server/meta/db";
-import { GRAPH_BASE, getMetaAppId, getMetaAppSecret } from "./config";
+import { GRAPH_BASE, getInstagramAppId, getInstagramAppSecret, getMetaAppId, getMetaAppSecret } from "./config";
 import { graphFetch, graphUrl, MetaGraphError } from "./graph-client";
 import { logMetaApiError, logMetaStep } from "./log";
 import type { GraphDebugTokenResponse } from "./types";
@@ -27,8 +27,13 @@ export async function checkAccountToken(socialAccountId: string): Promise<TokenC
   }
 
   const endpoint = "GET /debug_token";
+  const isInstagramLogin = account.metadata.authFlow === "instagram_login";
   try {
-    const appToken = `${getMetaAppId()}|${getMetaAppSecret()}`;
+    // Token de conta conectada via "Instagram Login" foi emitido sob o app do Instagram Login
+    // (getInstagramAppId/Secret) — pode ser um app dedicado diferente do app principal.
+    const appToken = isInstagramLogin
+      ? `${getInstagramAppId()}|${getInstagramAppSecret()}`
+      : `${getMetaAppId()}|${getMetaAppSecret()}`;
     const url = graphUrl(GRAPH_BASE, "debug_token", { input_token: token, access_token: appToken });
     const data = await graphFetch<GraphDebugTokenResponse>(url);
     const info = data.data;

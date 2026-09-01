@@ -1,6 +1,7 @@
 import { publicationLogsRepo, scheduledPostAccountsRepo, scheduledPostsRepo, socialAccountsRepo } from "@/lib/server/meta/db";
 import { publishFacebookReel } from "./facebook";
 import { MetaGraphError, MetaNetworkError } from "./graph-client";
+import { INSTAGRAM_GRAPH_BASE } from "./config";
 import { publishInstagramReel } from "./instagram";
 import { logMetaApiError, logMetaStep } from "./log";
 
@@ -82,6 +83,7 @@ export async function processScheduledPostAccount(scheduledPostAccountId: string
       accessToken,
       instagramUserId: account.instagramUserId,
       pageId: account.pageId,
+      authFlow: typeof account.metadata.authFlow === "string" ? account.metadata.authFlow : undefined,
       videoUrl: post.videoUrl,
       caption: post.caption,
     });
@@ -180,6 +182,7 @@ async function publishToAccount(params: {
   accessToken: string;
   instagramUserId: string | null;
   pageId: string | null;
+  authFlow?: string;
   videoUrl: string;
   caption: string;
 }): Promise<string> {
@@ -190,6 +193,9 @@ async function publishToAccount(params: {
       accessToken: params.accessToken,
       videoUrl: params.videoUrl,
       caption: params.caption,
+      // Contas conectadas via "Instagram Login" usam tokens do host graph.instagram.com —
+      // nunca funcionam contra graph.facebook.com (host das contas conectadas via Página).
+      graphBase: params.authFlow === "instagram_login" ? INSTAGRAM_GRAPH_BASE : undefined,
       onEvent: (step, metadata) => logMetaStep(step, { socialAccountId: params.socialAccountId, metadata }),
     });
     logMetaStep("META_MEDIA_PUBLISHED", { socialAccountId: params.socialAccountId, metadata: { mediaId: result.externalId, platform: "INSTAGRAM" } });

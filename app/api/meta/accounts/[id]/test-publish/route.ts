@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { publicationLogsRepo, socialAccountsRepo } from "@/lib/server/meta/db";
+import { INSTAGRAM_GRAPH_BASE } from "@/lib/server/meta/config";
 import { publishFacebookReel } from "@/lib/server/meta/facebook";
 import { MetaGraphError, MetaNetworkError } from "@/lib/server/meta/graph-client";
 import { publishInstagramReel } from "@/lib/server/meta/instagram";
@@ -55,6 +56,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         accessToken,
         videoUrl: body.videoUrl,
         caption,
+        graphBase: account.metadata.authFlow === "instagram_login" ? INSTAGRAM_GRAPH_BASE : undefined,
         onEvent,
       });
       externalId = result.externalId;

@@ -9,6 +9,9 @@ export const GRAPH_API_VERSION = process.env.META_GRAPH_API_VERSION?.trim() || "
 export const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`;
 export const OAUTH_DIALOG_URL = `https://www.facebook.com/${GRAPH_API_VERSION}/dialog/oauth`;
 export const RUPLOAD_BASE = "https://rupload.facebook.com";
+/** Graph API do Instagram usada pelo fluxo "Instagram API with Instagram Login" — tokens
+ *  emitidos por esse fluxo só funcionam contra esse host, nunca graph.facebook.com. */
+export const INSTAGRAM_GRAPH_BASE = `https://graph.instagram.com/${process.env.META_INSTAGRAM_GRAPH_API_VERSION?.trim() || GRAPH_API_VERSION}`;
 
 const BASIC_META_OAUTH_SCOPES = ["public_profile"] as const;
 
@@ -78,6 +81,31 @@ export function getMetaAppSecret(): string {
 
 export function getMetaRedirectUri(): string {
   return required("META_REDIRECT_URI");
+}
+
+/** App do Instagram Login pode ser o mesmo app da Meta usado pra Facebook Login (na maioria dos
+ *  casos, um único app com os dois produtos ativados) ou um app dedicado — cai no app principal
+ *  se as variáveis específicas não forem definidas. */
+export function getInstagramAppId(): string {
+  return process.env.META_INSTAGRAM_APP_ID?.trim() || getMetaAppId();
+}
+
+export function getInstagramAppSecret(): string {
+  return process.env.META_INSTAGRAM_APP_SECRET?.trim() || getMetaAppSecret();
+}
+
+export function getInstagramRedirectUri(): string {
+  return (
+    process.env.META_INSTAGRAM_REDIRECT_URI?.trim() ||
+    getMetaRedirectUri().replace(/\/api\/meta\/callback\/?$/, "/api/meta/instagram/callback")
+  );
+}
+
+export function isInstagramLoginConfigured(): boolean {
+  return Boolean(
+    (process.env.META_INSTAGRAM_APP_ID?.trim() || process.env.META_APP_ID) &&
+      (process.env.META_INSTAGRAM_APP_SECRET?.trim() || process.env.META_APP_SECRET)
+  );
 }
 
 /** URL do painel para onde o navegador volta depois do OAuth.
