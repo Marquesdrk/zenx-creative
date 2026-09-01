@@ -197,7 +197,7 @@ function ContasMetaContent() {
           </div>
 
           <AppCard className="overflow-hidden">
-            <div className="grid grid-cols-[1.1fr_1.8fr_170px] border-b border-border px-4 py-3 text-[11px] font-semibold uppercase text-muted">
+            <div className="grid grid-cols-[1.1fr_1.8fr_260px] border-b border-border px-4 py-3 text-[11px] font-semibold uppercase text-muted">
               <span>Marca</span>
               <span>Contas conectadas</span>
               <span className="text-right">Ações</span>
@@ -211,7 +211,7 @@ function ContasMetaContent() {
               </div>
             ) : (
               brandRows.map((brand) => (
-                <div key={brand.key} className="grid grid-cols-[1.1fr_1.8fr_170px] items-center gap-4 border-b border-border px-4 py-5 last:border-b-0">
+                <div key={brand.key} className="grid grid-cols-[1.1fr_1.8fr_260px] items-center gap-4 border-b border-border px-4 py-5 last:border-b-0">
                   <div className="flex min-w-0 items-center gap-3">
                     <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-sm font-bold text-white">
                       {initials(brand.name)}
@@ -227,7 +227,7 @@ function ContasMetaContent() {
                     <AccountSlot platform="TIKTOK" />
                     <AccountSlot platform="FACEBOOK" account={brand.facebook} />
                   </div>
-                  <div className="flex justify-end gap-2">
+                  <div className="flex flex-wrap justify-end gap-2">
                     <a href="/api/meta/auth?switch_account=1" className="inline-flex h-9 items-center rounded-lg border border-border bg-[#101014] px-4 text-sm font-semibold text-foreground hover:bg-card-hover">Gerenciar</a>
                     {(brand.instagram || brand.facebook) && (
                       <button
