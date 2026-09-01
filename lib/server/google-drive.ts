@@ -1,14 +1,12 @@
-import { createReadStream } from "node:fs";
 import { google } from "googleapis";
-import { driveTokensRepo } from "./db";
+import { Readable } from "node:stream";
+import { googleDriveTokensRepo, type GoogleDriveTokens } from "@/lib/server/google/drive-tokens-db";
 
 // O mesmo consentimento também autoriza upload no YouTube (lib/server/publishing/youtube.ts),
-// evitando um segundo fluxo de OAuth só para isso.
-const SCOPES = [
-  "https://www.googleapis.com/auth/drive.file",
-  "https://www.googleapis.com/auth/youtube.upload",
-];
-const FOLDER_NAME = "Vídeos para postar";
+// evitando um segundo fluxo de OAuth só para isso. Tokens vivem no Supabase (ver
+// lib/server/google/drive-tokens-db.ts) — precisam sobreviver a cold starts na Vercel.
+const SCOPES = ["https://www.googleapis.com/auth/drive.file", "https://www.googleapis.com/auth/youtube.upload"];
+const ROOT_FOLDER_NAME = "Zenx Creative - Agendados";
 
 /** Credenciais de um app OAuth do Google Cloud (Desktop ou Web), com a Drive API habilitada.
  *  Ver .env.local.example para o passo a passo de como gerar essas três variáveis. */
@@ -18,77 +16,160 @@ export function isDriveConfigured(): boolean {
   );
 }
 
-function getOAuthClient() {
+async function getOAuthClient() {
   if (!isDriveConfigured()) return null;
   const client = new google.auth.OAuth2(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
     process.env.GOOGLE_REDIRECT_URI
   );
-  const tokens = driveTokensRepo.get();
-  if (tokens) client.setCredentials(tokens);
+  const tokens = await googleDriveTokensRepo.get();
+  if (!tokens) return null;
+  client.setCredentials(tokens);
   client.on("tokens", (refreshed) => {
-    driveTokensRepo.set({ ...(driveTokensRepo.get() ?? {}), ...refreshed } as Record<string, unknown>);
+    void googleDriveTokensRepo.set(refreshed as GoogleDriveTokens);
   });
   return client;
 }
 
-export function isDriveConnected(): boolean {
-  return isDriveConfigured() && driveTokensRepo.get() !== null;
+/** Cliente Google autenticado para reaproveitar em outros adapters do mesmo consentimento
+ *  (ex.: lib/server/publishing/youtube.ts) — retorna null se não configurado/conectado. */
+export async function getGoogleAuthClient() {
+  return getOAuthClient();
+}
+
+export async function isDriveConnected(): Promise<boolean> {
+  if (!isDriveConfigured()) return false;
+  return (await googleDriveTokensRepo.get()) !== null;
 }
 
 export function getAuthUrl(): string {
-  const client = getOAuthClient();
-  if (!client) {
+  if (!isDriveConfigured()) {
     throw new Error(
       "Google Drive não configurado — defina GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET e GOOGLE_REDIRECT_URI."
     );
   }
+  const client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
   return client.generateAuthUrl({ access_type: "offline", prompt: "consent", scope: SCOPES });
 }
 
 export async function handleOAuthCallback(code: string): Promise<void> {
-  const client = getOAuthClient();
-  if (!client) throw new Error("Google Drive não configurado.");
+  if (!isDriveConfigured()) throw new Error("Google Drive não configurado.");
+  const client = new google.auth.OAuth2(
+    process.env.GOOGLE_CLIENT_ID,
+    process.env.GOOGLE_CLIENT_SECRET,
+    process.env.GOOGLE_REDIRECT_URI
+  );
   const { tokens } = await client.getToken(code);
-  driveTokensRepo.set(tokens as Record<string, unknown>);
+  await googleDriveTokensRepo.set(tokens as GoogleDriveTokens);
 }
 
-let cachedFolderId: string | null = null;
+export async function disconnectDrive(): Promise<void> {
+  await googleDriveTokensRepo.clear();
+}
 
-async function ensureFolder(auth: InstanceType<typeof google.auth.OAuth2>): Promise<string> {
-  if (cachedFolderId) return cachedFolderId;
-  const drive = google.drive({ version: "v3", auth });
+// Cache em memória do processo (mesma ideia do antigo cachedFolderId) — evita 2 buscas por
+// upload; se o processo reiniciar, a próxima chamada só refaz a busca/criação uma vez.
+const folderIdCache = new Map<string, string>();
+
+async function ensureFolder(
+  drive: ReturnType<typeof google.drive>,
+  name: string,
+  parentId: string | null
+): Promise<string> {
+  const cacheKey = `${parentId ?? "root"}/${name}`;
+  const cached = folderIdCache.get(cacheKey);
+  if (cached) return cached;
+
+  const parentClause = parentId ? ` and '${parentId}' in parents` : "";
   const existing = await drive.files.list({
-    q: `name = '${FOLDER_NAME}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    q: `name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false${parentClause}`,
     fields: "files(id, name)",
   });
   const found = existing.data.files?.[0]?.id;
   if (found) {
-    cachedFolderId = found;
+    folderIdCache.set(cacheKey, found);
     return found;
   }
+
   const created = await drive.files.create({
-    requestBody: { name: FOLDER_NAME, mimeType: "application/vnd.google-apps.folder" },
+    requestBody: {
+      name,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: parentId ? [parentId] : undefined,
+    },
     fields: "id",
   });
-  cachedFolderId = created.data.id!;
-  return cachedFolderId;
+  const id = created.data.id!;
+  folderIdCache.set(cacheKey, id);
+  return id;
 }
 
-/** Envia um render concluído para a pasta "Vídeos para postar" no Drive. Não faz nada (e
- *  não lança erro) se o Drive não estiver conectado — o vídeo continua servido localmente
- *  em /renders/ normalmente. */
-export async function uploadRenderToDrive(filePath: string, filename: string): Promise<{ fileId: string } | null> {
-  if (!isDriveConnected()) return null;
-  const client = getOAuthClient();
-  if (!client) return null;
+/** Garante a estrutura "Zenx Creative - Agendados/@usuario" e devolve o id da subpasta —
+ *  organiza os vídeos agendados por conta do Instagram dentro do Drive do usuário. */
+async function ensureAccountFolder(client: InstanceType<typeof google.auth.OAuth2>, username: string): Promise<string> {
   const drive = google.drive({ version: "v3", auth: client });
-  const folderId = await ensureFolder(client);
+  const rootId = await ensureFolder(drive, ROOT_FOLDER_NAME, null);
+  const accountFolderName = `@${username.replace(/^@/, "")}`;
+  return ensureFolder(drive, accountFolderName, rootId);
+}
+
+/** Sobe um vídeo agendado para a pasta da conta no Drive (criando-a se preciso) e devolve o
+ *  fileId — esse é o único dado persistido (scheduled_posts.drive_file_id); o arquivo nunca é
+ *  duplicado em outro storage. */
+export async function uploadScheduledVideoToDrive(
+  fileBuffer: Buffer,
+  filename: string,
+  mimeType: string,
+  instagramUsername: string
+): Promise<{ fileId: string; fileName: string }> {
+  const client = await getOAuthClient();
+  if (!client) throw new Error("Google Drive não conectado — conecte em Configurações antes de enviar vídeos.");
+  const drive = google.drive({ version: "v3", auth: client });
+  const folderId = await ensureAccountFolder(client, instagramUsername);
   const res = await drive.files.create({
     requestBody: { name: filename, parents: [folderId] },
-    media: { mimeType: "video/mp4", body: createReadStream(filePath) },
-    fields: "id",
+    media: { mimeType, body: Readable.from(fileBuffer) },
+    fields: "id, name",
   });
-  return res.data.id ? { fileId: res.data.id } : null;
+  if (!res.data.id) throw new Error("O Google Drive não retornou um ID de arquivo após o upload.");
+  return { fileId: res.data.id, fileName: res.data.name ?? filename };
+}
+
+export type DriveFileStream = {
+  stream: Readable;
+  mimeType: string;
+  size: number | null;
+  contentRange: string | null;
+  status: number;
+};
+
+/** Baixa um arquivo do Drive como stream para repassar via proxy HTTP próprio (ver
+ *  app/api/drive/stream/[fileId]/route.ts) — a Meta não consegue baixar direto do Drive sem
+ *  autenticação, então o Zenx faz essa ponte sem nunca gravar uma segunda cópia do vídeo. */
+export async function streamDriveFile(fileId: string, rangeHeader?: string | null): Promise<DriveFileStream> {
+  const client = await getOAuthClient();
+  if (!client) throw new Error("Google Drive não conectado.");
+  const drive = google.drive({ version: "v3", auth: client });
+
+  const meta = await drive.files.get({ fileId, fields: "mimeType, size" });
+  const mimeType = meta.data.mimeType ?? "video/mp4";
+  const size = meta.data.size ? Number(meta.data.size) : null;
+
+  const res = await drive.files.get(
+    { fileId, alt: "media" },
+    { responseType: "stream", headers: rangeHeader ? { Range: rangeHeader } : undefined }
+  );
+  const headers = res.headers as Record<string, string> | undefined;
+  return {
+    stream: res.data as unknown as Readable,
+    mimeType,
+    size,
+    contentRange: headers?.["content-range"] ?? null,
+    status: res.status,
+  };
 }

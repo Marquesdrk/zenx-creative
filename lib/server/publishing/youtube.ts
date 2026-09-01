@@ -1,34 +1,24 @@
 import { createReadStream } from "node:fs";
 import { google } from "googleapis";
-import { driveTokensRepo } from "@/lib/server/db";
+import { getGoogleAuthClient, isDriveConfigured } from "@/lib/server/google-drive";
 import type { FetchedMetrics, PlatformAdapter, PublishInput, PublishResult } from "./types";
 
 /** Reaproveita a mesma conexão Google usada pelo Drive (lib/server/google-drive.ts) — o
- *  escopo youtube.upload já é pedido no mesmo consentimento. */
-function getAuthedClient() {
-  if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REDIRECT_URI) {
-    return null;
-  }
-  const tokens = driveTokensRepo.get();
-  if (!tokens) return null;
-  const client = new google.auth.OAuth2(
-    process.env.GOOGLE_CLIENT_ID,
-    process.env.GOOGLE_CLIENT_SECRET,
-    process.env.GOOGLE_REDIRECT_URI
-  );
-  client.setCredentials(tokens);
-  return client;
+ *  escopo youtube.upload já é pedido no mesmo consentimento, com o token persistido no Supabase. */
+async function getAuthedClient() {
+  if (!isDriveConfigured()) return null;
+  return getGoogleAuthClient();
 }
 
 export const youtubeAdapter: PlatformAdapter = {
   name: "YouTube",
 
   isConfigured() {
-    return getAuthedClient() !== null;
+    return isDriveConfigured();
   },
 
   async publish(input: PublishInput): Promise<PublishResult> {
-    const client = getAuthedClient();
+    const client = await getAuthedClient();
     if (!client) throw new Error("YouTube não configurado — conecte sua conta Google em Configurações.");
     const youtube = google.youtube({ version: "v3", auth: client });
     const res = await youtube.videos.insert({
@@ -45,7 +35,7 @@ export const youtubeAdapter: PlatformAdapter = {
   },
 
   async fetchMetrics(externalId: string): Promise<FetchedMetrics> {
-    const client = getAuthedClient();
+    const client = await getAuthedClient();
     if (!client) throw new Error("YouTube não configurado.");
     const youtube = google.youtube({ version: "v3", auth: client });
     const res = await youtube.videos.list({ part: ["statistics"], id: [externalId] });

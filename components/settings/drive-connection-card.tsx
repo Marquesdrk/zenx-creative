@@ -28,7 +28,7 @@ export function DriveConnectionCard() {
           {!status.configured
             ? "Não configurado — defina as credenciais no .env.local (veja .env.local.example)."
             : connected
-              ? 'Conectado — renders concluídos são enviados para "Vídeos para postar".'
+              ? 'Conectado — vídeos agendados podem ser guardados em "Zenx Creative - Agendados/@conta" no seu Drive.'
               : "Não conectado."}
         </p>
         {driveError && <p className="mt-1 text-xs text-red-400">Erro ao conectar: {driveError}</p>}

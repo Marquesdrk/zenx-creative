@@ -14,7 +14,10 @@ export async function GET() {
 }
 
 type CreateBody = {
-  videoUrl: string;
+  videoUrl?: string | null;
+  videoSource?: "url" | "drive";
+  driveFileId?: string | null;
+  driveFileName?: string | null;
   caption: string;
   scheduledAt: string | null;
   socialAccountIds: string[];
@@ -27,7 +30,9 @@ type CreateBody = {
  *  via GET nesta mesma rota em vez de esperar a resposta deste POST. */
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as CreateBody | null;
-  if (!body?.videoUrl || !Array.isArray(body.socialAccountIds) || body.socialAccountIds.length === 0) {
+  const videoSource: "url" | "drive" = body?.videoSource === "drive" ? "drive" : "url";
+  const hasVideo = videoSource === "drive" ? Boolean(body?.driveFileId) : Boolean(body?.videoUrl);
+  if (!body || !hasVideo || !Array.isArray(body.socialAccountIds) || body.socialAccountIds.length === 0) {
     return NextResponse.json({ error: "Informe um vídeo e ao menos uma conta de destino." }, { status: 400 });
   }
 
@@ -44,7 +49,10 @@ export async function POST(request: Request) {
   const post: ScheduledPost = {
     id: crypto.randomUUID(),
     userId: null,
-    videoUrl: body.videoUrl,
+    videoUrl: videoSource === "url" ? (body.videoUrl ?? null) : null,
+    videoSource,
+    driveFileId: videoSource === "drive" ? (body.driveFileId ?? null) : null,
+    driveFileName: videoSource === "drive" ? (body.driveFileName ?? null) : null,
     caption: body.caption ?? "",
     scheduledAt: scheduledAtIso,
     status: isImmediate ? "processing" : "scheduled",

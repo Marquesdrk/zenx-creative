@@ -46,10 +46,19 @@ export type PublicSocialAccount = SocialAccount;
 
 export type ScheduledPostStatus = "draft" | "scheduled" | "processing" | "published" | "failed" | "cancelled";
 
+export type ScheduledPostVideoSource = "url" | "drive";
+
 export type ScheduledPost = {
   id: string;
   userId: string | null;
-  videoUrl: string;
+  /** Só preenchido quando videoSource = "url". Para "drive", a URL pública é gerada sob demanda
+   *  (assinada, curta duração) a partir de driveFileId — ver lib/server/meta/video-source.ts. */
+  videoUrl: string | null;
+  videoSource: ScheduledPostVideoSource;
+  /** Só preenchido quando videoSource = "drive" — id do arquivo no Google Drive do usuário,
+   *  organizado em "Zenx Creative - Agendados/@conta" (lib/server/google-drive.ts). */
+  driveFileId: string | null;
+  driveFileName: string | null;
   caption: string;
   scheduledAt: string | null;
   /** Status agregado (derivado dos destinos) — útil pra listagens; a verdade por destino

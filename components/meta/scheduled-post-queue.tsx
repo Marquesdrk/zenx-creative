@@ -1,6 +1,6 @@
 "use client";
 
-import { Play } from "lucide-react";
+import { HardDrive, Play } from "lucide-react";
 import type { PublicSocialAccount, ScheduledPost, ScheduledPostAccount, ScheduledPostAccountStatus } from "@/lib/server/meta/types";
 
 const STATUS_LABEL: Record<ScheduledPostAccountStatus, string> = {
@@ -63,9 +63,22 @@ export function ScheduledPostQueue({
               const destinations = accounts.filter((a) => a.scheduledPostId === post.id);
               return (
                 <div key={post.id} className="rounded-lg border border-border bg-card p-3">
-                  <p className="truncate text-xs font-semibold text-foreground">
-                    {post.caption || "(sem legenda)"}
-                  </p>
+                  <div className="flex items-center gap-1.5">
+                    <p className="truncate text-xs font-semibold text-foreground">
+                      {post.caption || "(sem legenda)"}
+                    </p>
+                    {post.videoSource === "drive" && post.driveFileId && (
+                      <a
+                        href={`https://drive.google.com/file/d/${post.driveFileId}/view`}
+                        target="_blank"
+                        rel="noreferrer"
+                        title="Ver no Google Drive"
+                        className="inline-flex shrink-0 items-center text-muted hover:text-foreground"
+                      >
+                        <HardDrive size={11} />
+                      </a>
+                    )}
+                  </div>
                   <p className="mt-1 text-[11px] text-muted">
                     {post.status === "draft"
                       ? "Aguardando destinos"

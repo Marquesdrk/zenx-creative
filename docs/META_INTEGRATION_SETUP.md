@@ -140,7 +140,11 @@ meta_oauth_sessions       -- cache curto (15 min) dos ativos descobertos após o
                           -- até o usuário escolher o que conectar
 
 scheduled_posts
-  id, user_id, video_url, caption, scheduled_at, status, created_at, updated_at
+  id, user_id, video_url (null se video_source='drive'), video_source ('url'|'drive'),
+  drive_file_id, drive_file_name, caption, scheduled_at, status, created_at, updated_at
+
+google_drive_tokens       -- token OAuth do Google (Drive + YouTube), linha única (id=1) —
+                          -- ver seção 3.1
 
 scheduled_post_accounts   -- 1 linha por destino: 1 vídeo → N contas, status independente
   id, scheduled_post_id, social_account_id, status, external_post_id,
@@ -174,6 +178,38 @@ cliente, ela não enxerga nada nessas tabelas.
 **O resto do produto continua em SQLite**: perfis, templates, lotes de renderização e métricas
 do editor de vídeo (`lib/server/db.ts`) não têm relação com a integração Meta e não foram
 tocados — a migração pra Supabase foi escopada só às tabelas acima.
+
+### 3.1. Google Drive como storage de vídeo (opcional)
+
+Alternativa ao upload local/Vercel Blob para não depender do Supabase Storage pra volume de
+vídeo: ao agendar um post, o vídeo pode ser guardado no Google Drive do próprio usuário, numa
+pasta organizada automaticamente por conta —
+`Zenx Creative - Agendados/@usuario_do_instagram/arquivo.mp4`. As duas opções coexistem: cada
+post escolhe uma (`scheduled_posts.video_source`).
+
+**Como funciona na publicação**: a Meta só sabe baixar vídeo de uma URL HTTPS pública — ela não
+tem acesso ao Drive. Por isso, na hora de publicar, o Zenx gera uma URL própria, assinada e de
+curta duração (`buildSignedDriveStreamUrl`, `lib/server/google/drive-stream-url.ts`, 30min de
+validade), que aponta para `GET /api/drive/stream/[fileId]`
+(`app/api/drive/stream/[fileId]/route.ts`). Essa rota baixa o arquivo do Drive com o token OAuth
+do servidor e repassa os bytes via streaming — o vídeo nunca é duplicado em outro storage, só
+"passa" pelo servidor no momento exato da publicação. Ver `lib/server/meta/video-source.ts`.
+
+**Configuração** (reaproveita o mesmo app OAuth do Google já usado pelo upload de YouTube —
+ver `.env.local.example`):
+1. `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REDIRECT_URI` — um app OAuth do Google
+   Cloud com a Drive API habilitada.
+2. `DRIVE_STREAM_SECRET` — assina as URLs do passo acima. Gere com `openssl rand -hex 24`.
+3. `PUBLIC_BASE_URL` — precisa apontar pro domínio público de produção (a Meta busca o vídeo
+   nesse domínio).
+4. Conectar em **Configurações → Google Drive → Conectar** (fluxo OAuth normal, tokens
+   persistidos em `google_drive_tokens` no Supabase — sobrevive a cold starts na Vercel,
+   diferente da versão anterior que guardava em SQLite/`/tmp`).
+5. Rode `supabase/migrations/0002_google_drive_storage.sql` no Supabase (cria a tabela de
+   tokens e as colunas novas em `scheduled_posts`).
+
+Na tela de agendamento (`/publicar`), com o Drive conectado, um checkbox "Guardar no Google
+Drive" aparece marcado por padrão — desmarcar volta para o upload local/Vercel Blob de sempre.
 
 ## 4. Arquitetura do código
 

@@ -10,6 +10,7 @@ import type {
   ScheduledPostAccount,
   ScheduledPostAccountStatus,
   ScheduledPostStatus,
+  ScheduledPostVideoSource,
   SocialAccount,
   SocialAccountStatus,
   SocialPlatform,
@@ -220,7 +221,10 @@ export const socialAccountsRepo = {
 type ScheduledPostRow = {
   id: string;
   user_id: string | null;
-  video_url: string;
+  video_url: string | null;
+  video_source: string;
+  drive_file_id: string | null;
+  drive_file_name: string | null;
   caption: string;
   scheduled_at: string | null;
   status: string;
@@ -233,6 +237,9 @@ function scheduledPostFromRow(row: ScheduledPostRow): ScheduledPost {
     id: row.id,
     userId: row.user_id,
     videoUrl: row.video_url,
+    videoSource: row.video_source as ScheduledPostVideoSource,
+    driveFileId: row.drive_file_id,
+    driveFileName: row.drive_file_name,
     caption: row.caption,
     scheduledAt: row.scheduled_at,
     status: row.status as ScheduledPostStatus,
@@ -261,6 +268,9 @@ export const scheduledPostsRepo = {
       id: post.id,
       user_id: post.userId,
       video_url: post.videoUrl,
+      video_source: post.videoSource,
+      drive_file_id: post.driveFileId,
+      drive_file_name: post.driveFileName,
       caption: post.caption,
       scheduled_at: post.scheduledAt,
       status: post.status,

@@ -398,23 +398,6 @@ export const batchItemsRepo = {
   },
 };
 
-export const driveTokensRepo = {
-  get(): Record<string, unknown> | null {
-    const row = openDb().prepare("SELECT tokens FROM drive_tokens WHERE id = 1").get() as unknown as
-      | { tokens: string }
-      | undefined;
-    return row ? JSON.parse(row.tokens) : null;
-  },
-  set(tokens: Record<string, unknown>) {
-    openDb()
-      .prepare(
-        `INSERT INTO drive_tokens (id, tokens) VALUES (1, ?)
-         ON CONFLICT(id) DO UPDATE SET tokens = excluded.tokens`
-      )
-      .run(JSON.stringify(tokens));
-  },
-};
-
 export const publicationsRepo = {
   list(): Publication[] {
     const rows = openDb()

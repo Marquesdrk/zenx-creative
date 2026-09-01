@@ -1,7 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
-import { CalendarClock, Send, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { CalendarClock, HardDrive, Send, Upload } from "lucide-react";
 import type { PublicSocialAccount } from "@/lib/server/meta/types";
 
 function toDatetimeLocal(date: Date) {
@@ -12,7 +12,11 @@ function toDatetimeLocal(date: Date) {
 
 /** Formulário de "Novo conteúdo": upload de vídeo, legenda, seleção de contas conectadas e
  *  publicar agora ou agendar — só mostra contas com status "connected" (uma expirada/revogada
- *  precisa ser reconectada em Contas Meta antes de aparecer aqui como destino disponível). */
+ *  precisa ser reconectada em Contas Meta antes de aparecer aqui como destino disponível).
+ *
+ *  O upload de fato (Drive ou local/Blob) só acontece no submit — antes disso o vídeo escolhido
+ *  fica só em memória (videoFile), porque o destino no Drive é organizado pela conta selecionada
+ *  ("Zenx Creative - Agendados/@conta") e a conta só é escolhida depois do arquivo. */
 export function ScheduledPostComposer({
   accounts,
   onCreated,
@@ -21,18 +25,29 @@ export function ScheduledPostComposer({
   onCreated: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
-  const [videoName, setVideoName] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [driveStatus, setDriveStatus] = useState<{ configured: boolean; connected: boolean } | null>(null);
+  const [useDrive, setUseDrive] = useState(true);
   const [caption, setCaption] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [scheduledAt, setScheduledAt] = useState(() => toDatetimeLocal(new Date(Date.now() + 60 * 60_000)));
   const [submitting, setSubmitting] = useState<"schedule" | "now" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    fetch("/api/drive/status")
+      .then((res) => res.json())
+      .then((data: { configured: boolean; connected: boolean }) => {
+        setDriveStatus(data);
+        setUseDrive(data.configured && data.connected);
+      })
+      .catch(() => setDriveStatus({ configured: false, connected: false }));
+  }, []);
+
   const connectedAccounts = useMemo(() => accounts.filter((a) => a.status === "connected"), [accounts]);
   const instagramAccounts = connectedAccounts.filter((a) => a.platform === "INSTAGRAM");
   const facebookAccounts = connectedAccounts.filter((a) => a.platform === "FACEBOOK");
+  const driveAvailable = Boolean(driveStatus?.configured && driveStatus?.connected);
 
   function toggle(id: string) {
     setSelected((current) => {
@@ -43,26 +58,15 @@ export function ScheduledPostComposer({
     });
   }
 
-  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+  function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setUploading(true);
     setError(null);
-    const formData = new FormData();
-    formData.append("file", file);
-    const res = await fetch("/api/upload", { method: "POST", body: formData });
-    setUploading(false);
-    if (!res.ok) {
-      setError("Falha ao enviar o vídeo.");
-      return;
-    }
-    const data = (await res.json()) as { url: string; filename: string };
-    setVideoUrl(data.url);
-    setVideoName(data.filename);
+    setVideoFile(file);
   }
 
   async function submit(mode: "schedule" | "now") {
-    if (!videoUrl) {
+    if (!videoFile) {
       setError("Envie um vídeo antes de publicar.");
       return;
     }
@@ -72,14 +76,44 @@ export function ScheduledPostComposer({
     }
     setSubmitting(mode);
     setError(null);
+
+    const selectedIds = Array.from(selected);
+    let payload: Record<string, unknown>;
+
+    if (useDrive && driveAvailable) {
+      const formData = new FormData();
+      formData.append("file", videoFile);
+      formData.append("socialAccountId", selectedIds[0]);
+      const uploadRes = await fetch("/api/scheduled-posts/upload-to-drive", { method: "POST", body: formData });
+      if (!uploadRes.ok) {
+        const data = await uploadRes.json().catch(() => ({}));
+        setSubmitting(null);
+        setError(data.error || "Falha ao enviar o vídeo para o Google Drive.");
+        return;
+      }
+      const data = (await uploadRes.json()) as { driveFileId: string; driveFileName: string };
+      payload = { videoSource: "drive", driveFileId: data.driveFileId, driveFileName: data.driveFileName };
+    } else {
+      const formData = new FormData();
+      formData.append("file", videoFile);
+      const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!uploadRes.ok) {
+        setSubmitting(null);
+        setError("Falha ao enviar o vídeo.");
+        return;
+      }
+      const data = (await uploadRes.json()) as { url: string };
+      payload = { videoSource: "url", videoUrl: data.url };
+    }
+
     const res = await fetch("/api/scheduled-posts", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        videoUrl,
+        ...payload,
         caption,
         scheduledAt: mode === "now" ? null : new Date(scheduledAt).toISOString(),
-        socialAccountIds: Array.from(selected),
+        socialAccountIds: selectedIds,
       }),
     });
     setSubmitting(null);
@@ -88,8 +122,7 @@ export function ScheduledPostComposer({
       setError(data.error || "Falha ao criar a publicação.");
       return;
     }
-    setVideoUrl(null);
-    setVideoName(null);
+    setVideoFile(null);
     setCaption("");
     setSelected(new Set());
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -108,8 +141,24 @@ export function ScheduledPostComposer({
           className="flex h-24 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-xs text-muted hover:bg-card-hover"
         >
           <Upload size={16} />
-          {uploading ? "Enviando…" : videoName ? videoName : "Clique para enviar um vídeo"}
+          {videoFile ? videoFile.name : "Clique para enviar um vídeo"}
         </label>
+
+        {driveStatus?.configured && (
+          <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-[11px] text-gray-300">
+            <input
+              type="checkbox"
+              checked={useDrive}
+              disabled={!driveAvailable}
+              onChange={(event) => setUseDrive(event.target.checked)}
+              className="h-3.5 w-3.5 accent-accent"
+            />
+            <HardDrive size={13} className="shrink-0" />
+            {driveAvailable
+              ? "Guardar no Google Drive (organizado por conta) em vez de upload local"
+              : "Google Drive não conectado — conecte em Configurações para guardar os vídeos lá"}
+          </label>
+        )}
       </div>
 
       <div className="mt-4">

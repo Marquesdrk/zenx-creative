@@ -4,6 +4,7 @@ import { MetaGraphError, MetaNetworkError } from "./graph-client";
 import { INSTAGRAM_GRAPH_BASE } from "./config";
 import { publishInstagramReel } from "./instagram";
 import { logMetaApiError, logMetaStep } from "./log";
+import { resolvePostVideoUrl } from "./video-source";
 
 const MAX_ATTEMPTS = 5;
 const BACKOFF_BASE_MS = 60_000; // 1min, 2min, 4min, 8min, 16min
@@ -77,6 +78,7 @@ export async function processScheduledPostAccount(scheduledPostAccountId: string
   }
 
   try {
+    const videoUrl = resolvePostVideoUrl(post);
     const externalId = await publishToAccount({
       platform: account.platform,
       socialAccountId: account.id,
@@ -84,7 +86,7 @@ export async function processScheduledPostAccount(scheduledPostAccountId: string
       instagramUserId: account.instagramUserId,
       pageId: account.pageId,
       authFlow: typeof account.metadata.authFlow === "string" ? account.metadata.authFlow : undefined,
-      videoUrl: post.videoUrl,
+      videoUrl,
       caption: post.caption,
     });
 
