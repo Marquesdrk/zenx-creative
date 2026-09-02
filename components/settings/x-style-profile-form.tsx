@@ -91,6 +91,38 @@ export function XStyleProfileForm({
             className="hidden"
             onChange={(event) => handleTemplateSelected(event.target.files)}
           />
+          <div>
+            <p className="mb-1.5 text-xs text-muted">Cor do título e do texto abaixo do vídeo</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                aria-pressed={(profile.textColor ?? "black") === "black"}
+                onClick={() => onChange({ ...profile, textColor: "black" })}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  (profile.textColor ?? "black") === "black"
+                    ? "border-accent bg-card-hover text-foreground"
+                    : "border-border bg-background text-gray-300"
+                }`}
+              >
+                <span className="h-3 w-3 rounded-full border border-border bg-black" />
+                Preto
+              </button>
+              <button
+                type="button"
+                aria-pressed={profile.textColor === "white"}
+                onClick={() => onChange({ ...profile, textColor: "white" })}
+                className={`flex flex-1 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  profile.textColor === "white"
+                    ? "border-accent bg-card-hover text-foreground"
+                    : "border-border bg-background text-gray-300"
+                }`}
+              >
+                <span className="h-3 w-3 rounded-full border border-border bg-white" />
+                Branco
+              </button>
+            </div>
+            <p className="mt-1.5 text-[11px] text-muted">Use branco em templates de fundo escuro.</p>
+          </div>
         </div>
       </div>
 

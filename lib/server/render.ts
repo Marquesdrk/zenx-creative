@@ -404,13 +404,14 @@ async function drawTextBlock(
     lineHeight: number;
     weight?: "bold";
     align?: "left" | "center";
+    color?: "white" | "black";
   }
 ): Promise<void> {
   const maxChars = Math.max(10, Math.floor(options.maxWidth / (options.fontSize * 0.52)));
   const lines = wrapText(text, maxChars, options.maxLines);
   if (lines.length === 0) return;
 
-  ctx.fillStyle = "black";
+  ctx.fillStyle = options.color ?? "black";
   ctx.font = `${options.fontSize}pt ZenxSans`;
   ctx.textBaseline = "top";
   for (const [index, line] of lines.entries()) {
@@ -428,6 +429,7 @@ async function createXStyleTextOverlay(item: BatchItem, profile: Profile, output
 
   const layout = resolveXStyleLayout(profile.xStyleLayout);
   const title = item.manualOverrides.title || profile.defaultTitle || "";
+  const color = profile.textColor ?? "black";
   await ensureTextFont();
   const image = PImage.make(OUTPUT_WIDTH, OUTPUT_HEIGHT);
   const ctx = image.getContext("2d");
@@ -440,6 +442,7 @@ async function createXStyleTextOverlay(item: BatchItem, profile: Profile, output
     maxLines: layout.title.maxLines,
     lineHeight: Math.round(layout.title.fontSize * 1.12),
     weight: "bold",
+    color,
   });
   await drawTextBlock(ctx, item.manualOverrides.caption, {
     x: layout.body.x,
@@ -450,6 +453,7 @@ async function createXStyleTextOverlay(item: BatchItem, profile: Profile, output
     lineHeight: Math.round(layout.body.fontSize * 1.12),
     weight: "bold",
     align: "center",
+    color,
   });
 
   const overlayPath = outputPath.replace(/\.mp4$/i, "-text.png");

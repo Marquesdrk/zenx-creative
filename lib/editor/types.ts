@@ -42,6 +42,9 @@ export type XStyleProfile = {
   defaultTitle?: string;
   /** Layout relativo ao canvas 1080x1920 do template pronto. */
   xStyleLayout?: XStyleLayout;
+  /** Cor do título e do texto abaixo do vídeo — depende do fundo do template importado
+   *  (backgroundImageUrl). Ausente = "black" (comportamento histórico). */
+  textColor?: "white" | "black";
 };
 
 export type UgcProfile = {

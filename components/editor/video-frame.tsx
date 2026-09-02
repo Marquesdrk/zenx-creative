@@ -215,7 +215,9 @@ export function VideoFrame({
             }}
           />
           <p
-            className="absolute line-clamp-2 text-left font-semibold leading-tight text-black [overflow-wrap:anywhere]"
+            className={`absolute line-clamp-2 text-left font-semibold leading-tight [overflow-wrap:anywhere] ${
+              profile.textColor === "white" ? "text-white" : "text-black"
+            }`}
             style={{
               left: `${(xStyleLayout.title.x / 1080) * 100}%`,
               top: `${(xStyleLayout.title.y / 1920) * 100}%`,
@@ -226,7 +228,9 @@ export function VideoFrame({
             <EmojiText text={title || profile.defaultTitle || "Titulo do video"} />
           </p>
           <p
-            className="absolute line-clamp-2 text-center font-bold leading-tight text-neutral-950"
+            className={`absolute line-clamp-2 text-center font-bold leading-tight ${
+              profile.textColor === "white" ? "text-white" : "text-neutral-950"
+            }`}
             style={{
               left: `${(xStyleLayout.body.x / 1080) * 100}%`,
               top: `${(xStyleLayout.body.y / 1920) * 100}%`,
