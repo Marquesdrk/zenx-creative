@@ -4,31 +4,32 @@ import { useSyncExternalStore } from "react";
 import { MOCK_TEMPLATES } from "./mock-templates";
 import type { Engine, Template } from "./types";
 
-const STORAGE_KEY = "zenx-creative:editor:templates:v1";
+// Antes vivia só no localStorage (não sincronizava entre navegadores/máquinas — ver
+// lib/server/editor-store-db.ts para o porquê da migração). Agora busca/persiste via
+// /api/templates (Supabase); a interface do hook não muda, só a fonte da verdade.
 
 let cache: Template[] | null = null;
 const listeners = new Set<() => void>();
+let fetchStarted = false;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
 function notify() {
   listeners.forEach((listener) => listener());
 }
 
-function readStoredTemplates(): Template[] {
-  if (typeof window === "undefined") return MOCK_TEMPLATES;
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (!stored) return MOCK_TEMPLATES;
-  try {
-    const parsed = JSON.parse(stored) as Template[];
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : MOCK_TEMPLATES;
-  } catch {
-    return MOCK_TEMPLATES;
-  }
-}
-
 function ensureHydrated() {
-  if (cache !== null) return;
-  cache = readStoredTemplates();
-  notify();
+  if (fetchStarted) return;
+  fetchStarted = true;
+  fetch("/api/templates")
+    .then((res) => res.json())
+    .then((data: Template[]) => {
+      cache = Array.isArray(data) && data.length > 0 ? data : MOCK_TEMPLATES;
+      notify();
+    })
+    .catch(() => {
+      cache = MOCK_TEMPLATES;
+      notify();
+    });
 }
 
 function subscribe(onStoreChange: () => void) {
@@ -46,15 +47,19 @@ function getServerSnapshot(): Template[] | null {
 }
 
 function persist(templates: Template[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(templates));
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    void fetch("/api/templates", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(templates),
+    });
+  }, 500);
 }
 
 /**
- * Templates do Editor em massa, persistidos localmente no navegador de cada máquina.
- * Cada perfil aponta para um via `templateId`. Hoje é sempre 1:1 (cada perfil cria
- * o próprio template ao ser criado), mas o modelo já suporta vários perfis reaproveitando
- * o mesmo template.
+ * Templates do Editor em massa, persistidos no Supabase — compartilhados entre qualquer
+ * navegador/máquina em que você usar o Zenx. Cada perfil aponta para um via `templateId`.
  */
 export function useTemplates(): [
   Template[],

@@ -4,31 +4,32 @@ import { useSyncExternalStore } from "react";
 import { MOCK_PROFILES } from "./mock-profiles";
 import { DEFAULT_X_STYLE_LAYOUT, type Engine, type Profile } from "./types";
 
-const STORAGE_KEY = "zenx-creative:editor:profiles:v1";
+// Antes vivia só no localStorage (não sincronizava entre navegadores/máquinas — ver
+// lib/server/editor-store-db.ts para o porquê da migração). Agora busca/persiste via
+// /api/profiles (Supabase); a interface do hook não muda, só a fonte da verdade.
 
 let cache: Profile[] | null = null;
 const listeners = new Set<() => void>();
+let fetchStarted = false;
+let syncTimer: ReturnType<typeof setTimeout> | null = null;
 
 function notify() {
   listeners.forEach((listener) => listener());
 }
 
-function readStoredProfiles(): Profile[] {
-  if (typeof window === "undefined") return MOCK_PROFILES;
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (!stored) return MOCK_PROFILES;
-  try {
-    const parsed = JSON.parse(stored) as Profile[];
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : MOCK_PROFILES;
-  } catch {
-    return MOCK_PROFILES;
-  }
-}
-
 function ensureHydrated() {
-  if (cache !== null) return;
-  cache = readStoredProfiles();
-  notify();
+  if (fetchStarted) return;
+  fetchStarted = true;
+  fetch("/api/profiles")
+    .then((res) => res.json())
+    .then((data: Profile[]) => {
+      cache = Array.isArray(data) && data.length > 0 ? data : MOCK_PROFILES;
+      notify();
+    })
+    .catch(() => {
+      cache = MOCK_PROFILES;
+      notify();
+    });
 }
 
 function subscribe(onStoreChange: () => void) {
@@ -46,14 +47,20 @@ function getServerSnapshot(): Profile[] | null {
 }
 
 function persist(profiles: Profile[]) {
-  if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(profiles));
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => {
+    void fetch("/api/profiles", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(profiles),
+    });
+  }, 500);
 }
 
 /**
- * Perfis do Editor em massa, persistidos localmente no navegador de cada máquina.
- * Configurações e Editor em massa compartilham a mesma fonte, então editar um perfil ali
- * já reflete no próximo lote criado naquela máquina.
+ * Perfis do Editor em massa, persistidos no Supabase — compartilhados entre qualquer
+ * navegador/máquina em que você usar o Zenx (editar um perfil aqui já reflete no próximo lote
+ * criado em qualquer lugar).
  */
 export function useProfiles(): [Profile[], (next: Profile[] | ((current: Profile[]) => Profile[])) => void] {
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);

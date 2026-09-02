@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { batchesRepo, batchItemsRepo, metricSnapshotsRepo, profilesRepo, publicationsRepo } from "@/lib/server/db";
+import { batchesRepo, batchItemsRepo, metricSnapshotsRepo, publicationsRepo } from "@/lib/server/db";
+import { editorProfilesRepo } from "@/lib/server/editor-store-db";
 import { PLATFORM_LABELS } from "@/lib/editor/types";
 
 export async function GET() {
@@ -7,7 +8,7 @@ export async function GET() {
   const latestSnapshots = metricSnapshotsRepo.listLatestPerPublication();
   const items = batchItemsRepo.list();
   const batches = batchesRepo.list();
-  const profiles = profilesRepo.list();
+  const profiles = await editorProfilesRepo.list();
 
   const rows = publications.map((pub) => {
     const item = items.find((i) => i.id === pub.batchItemId);

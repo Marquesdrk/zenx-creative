@@ -1,21 +1,19 @@
 import { NextResponse } from "next/server";
-import { templatesRepo } from "@/lib/server/db";
+import { editorTemplatesRepo } from "@/lib/server/editor-store-db";
 import type { Template } from "@/lib/editor/types";
 
 export async function GET() {
-  return NextResponse.json(templatesRepo.list());
+  return NextResponse.json(await editorTemplatesRepo.list());
 }
 
 /** Sincroniza a lista inteira, mesma semântica de /api/profiles. */
 export async function PUT(request: Request) {
   const templates = (await request.json()) as Template[];
-  const currentIds = new Set(templatesRepo.list().map((t) => t.id));
+  const current = await editorTemplatesRepo.list();
   const nextIds = new Set(templates.map((t) => t.id));
-  for (const id of currentIds) {
-    if (!nextIds.has(id)) templatesRepo.remove(id);
-  }
-  for (const template of templates) {
-    templatesRepo.upsert(template);
-  }
-  return NextResponse.json(templatesRepo.list());
+  await Promise.all([
+    ...current.filter((t) => !nextIds.has(t.id)).map((t) => editorTemplatesRepo.remove(t.id)),
+    ...templates.map((template) => editorTemplatesRepo.upsert(template)),
+  ]);
+  return NextResponse.json(await editorTemplatesRepo.list());
 }

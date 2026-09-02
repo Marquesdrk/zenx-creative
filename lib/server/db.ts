@@ -7,15 +7,10 @@ import type {
   ManualOverrides,
   MetricSnapshot,
   Platform,
-  Profile,
   Publication,
   PublicationStatus,
   SourceAnalysis,
-  Template,
 } from "@/lib/editor/types";
-import { DEFAULT_X_STYLE_LAYOUT } from "@/lib/editor/types";
-import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
-import { MOCK_TEMPLATES } from "@/lib/editor/mock-templates";
 
 const DATA_DIR = process.env.VERCEL ? path.join("/tmp", "zenx-data") : path.join(process.cwd(), "data");
 mkdirSync(DATA_DIR, { recursive: true });
@@ -24,91 +19,12 @@ mkdirSync(DATA_DIR, { recursive: true });
 // modes, but `global` survives), so we don't reopen/re-migrate the file on every import.
 const globalForDb = globalThis as unknown as { __zenxDb?: DatabaseSync };
 
-function seedDefaults(db: DatabaseSync) {
-  for (const template of MOCK_TEMPLATES) {
-    const exists = db.prepare("SELECT id FROM templates WHERE id = ?").get(template.id);
-    if (!exists) {
-      const { id, engine, name, ...rest } = template;
-      db.prepare("INSERT INTO templates (id, engine, name, data) VALUES (?, ?, ?, ?)").run(
-        id,
-        engine,
-        name,
-        JSON.stringify(rest)
-      );
-    }
-  }
-  for (const profile of MOCK_PROFILES) {
-    const exists = db.prepare("SELECT id FROM profiles WHERE id = ?").get(profile.id);
-    if (!exists) {
-      const { id, engine, name, templateId, ...rest } = profile as Profile & { templateId: string };
-      db.prepare("INSERT INTO profiles (id, engine, name, template_id, data) VALUES (?, ?, ?, ?, ?)").run(
-        id,
-        engine,
-        name,
-        templateId,
-        JSON.stringify(rest)
-      );
-    }
-  }
-  const xStyleRows = db.prepare("SELECT * FROM profiles WHERE engine = ?").all("X_STYLE") as unknown as ProfileRow[];
-  for (const row of xStyleRows) {
-    const data = JSON.parse(row.data) as Record<string, unknown>;
-    const layout = data.xStyleLayout as
-      | {
-          title?: { x?: number; y?: number; maxLines?: number };
-          video?: { x?: number; y?: number; width?: number; height?: number };
-          body?: { x?: number; y?: number; fontSize?: number; maxWidth?: number; maxLines?: number };
-        }
-      | undefined;
-    const usesLegacyStack =
-      !layout ||
-      (layout.title?.y === 1395 && layout.video?.y === 390 && layout.body?.y === 1475) ||
-      (layout.title?.y === 350 &&
-        layout.video?.x === 120 &&
-        layout.video?.y === 485 &&
-        layout.video?.width === 840 &&
-        layout.video?.height === 1000 &&
-        layout.body?.y === 1535) ||
-      (layout.title?.y === 350 &&
-        layout.video?.x === 70 &&
-        layout.video?.y === 455 &&
-        layout.video?.width === 940 &&
-        layout.video?.height === 1120 &&
-        (layout.title?.x === undefined || layout.title?.maxLines === undefined));
-    const usesSmallLowerCaption =
-      !layout?.body ||
-      layout.body.fontSize === undefined ||
-      layout.body.fontSize <= 40 ||
-      (layout.body.x === 120 && layout.body.y === 1615 && layout.body.maxWidth === 840);
-
-    if (!usesLegacyStack && !usesSmallLowerCaption) continue;
-    data.xStyleLayout = usesLegacyStack
-      ? DEFAULT_X_STYLE_LAYOUT
-      : { ...DEFAULT_X_STYLE_LAYOUT, ...layout, body: DEFAULT_X_STYLE_LAYOUT.body };
-    db.prepare("UPDATE profiles SET data = ? WHERE id = ?").run(JSON.stringify(data), row.id);
-  }
-}
-
 function openDb(): DatabaseSync {
   if (globalForDb.__zenxDb) {
-    seedDefaults(globalForDb.__zenxDb);
     return globalForDb.__zenxDb;
   }
   const db = new DatabaseSync(path.join(DATA_DIR, "zenx.sqlite"));
   db.exec(`
-    CREATE TABLE IF NOT EXISTS profiles (
-      id TEXT PRIMARY KEY,
-      engine TEXT NOT NULL,
-      name TEXT NOT NULL,
-      template_id TEXT NOT NULL,
-      data TEXT NOT NULL
-    );
-    CREATE TABLE IF NOT EXISTS templates (
-      id TEXT PRIMARY KEY,
-      engine TEXT NOT NULL,
-      name TEXT NOT NULL,
-      data TEXT NOT NULL
-    );
     CREATE TABLE IF NOT EXISTS batches (
       id TEXT PRIMARY KEY,
       profile_id TEXT NOT NULL,
@@ -158,14 +74,10 @@ function openDb(): DatabaseSync {
   ensureColumn(db, "batches", "storage_url", "TEXT");
   ensureColumn(db, "publications", "scheduled_at", "TEXT");
 
-  seedDefaults(db);
-
   globalForDb.__zenxDb = db;
   return db;
 }
 
-type ProfileRow = { id: string; engine: string; name: string; template_id: string; data: string };
-type TemplateRow = { id: string; engine: string; name: string; data: string };
 type BatchRow = {
   id: string;
   profile_id: string;
@@ -208,14 +120,6 @@ type MetricSnapshotRow = {
   comments: number;
   shares: number;
 };
-
-function profileFromRow(row: ProfileRow): Profile {
-  return { ...JSON.parse(row.data), id: row.id, engine: row.engine, name: row.name, templateId: row.template_id } as Profile;
-}
-
-function templateFromRow(row: TemplateRow): Template {
-  return { ...JSON.parse(row.data), id: row.id, engine: row.engine, name: row.name } as Template;
-}
 
 function batchFromRow(row: BatchRow): Batch {
   return {
@@ -271,51 +175,12 @@ function metricSnapshotFromRow(row: MetricSnapshotRow): MetricSnapshot {
   };
 }
 
-export const profilesRepo = {
-  list(): Profile[] {
-    const rows = openDb().prepare("SELECT * FROM profiles").all() as unknown as ProfileRow[];
-    return rows.map(profileFromRow);
-  },
-  upsert(profile: Profile) {
-    const { id, engine, name, templateId, ...rest } = profile as Profile & { templateId: string };
-    openDb()
-      .prepare(
-        `INSERT INTO profiles (id, engine, name, template_id, data) VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET engine = excluded.engine, name = excluded.name,
-           template_id = excluded.template_id, data = excluded.data`
-      )
-      .run(id, engine, name, templateId, JSON.stringify(rest));
-  },
-  remove(id: string) {
-    openDb().prepare("DELETE FROM profiles WHERE id = ?").run(id);
-  },
-};
-
 function ensureColumn(db: DatabaseSync, table: string, column: string, type: string) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{ name: string }>;
   if (!columns.some((c) => c.name === column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 }
-
-export const templatesRepo = {
-  list(): Template[] {
-    const rows = openDb().prepare("SELECT * FROM templates").all() as unknown as TemplateRow[];
-    return rows.map(templateFromRow);
-  },
-  upsert(template: Template) {
-    const { id, engine, name, ...rest } = template;
-    openDb()
-      .prepare(
-        `INSERT INTO templates (id, engine, name, data) VALUES (?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET engine = excluded.engine, name = excluded.name, data = excluded.data`
-      )
-      .run(id, engine, name, JSON.stringify(rest));
-  },
-  remove(id: string) {
-    openDb().prepare("DELETE FROM templates WHERE id = ?").run(id);
-  },
-};
 
 export const batchesRepo = {
   list(): Batch[] {

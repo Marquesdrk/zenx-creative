@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { batchesRepo, batchItemsRepo, profilesRepo } from "@/lib/server/db";
+import { batchesRepo, batchItemsRepo } from "@/lib/server/db";
+import { editorProfilesRepo } from "@/lib/server/editor-store-db";
 import { renderBatchItem } from "@/lib/server/render";
 
 async function processItem(itemId: string, profileId: string) {
   const item = batchItemsRepo.get(itemId);
-  const profile = profilesRepo.list().find((p) => p.id === profileId);
+  const profiles = await editorProfilesRepo.list();
+  const profile = profiles.find((p) => p.id === profileId);
   if (!item || !profile) return;
 
   const outcome = await renderBatchItem(item, profile);
