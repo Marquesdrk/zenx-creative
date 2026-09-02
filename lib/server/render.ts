@@ -301,29 +301,49 @@ async function renderReact(
   }
 }
 
+/** Quebra de linha manual (Enter no textarea) é intencional e precisa virar uma linha de
+ *  verdade no render — por isso separa por parágrafo antes de colapsar espaços, em vez de
+ *  substituir todo `\s+` (que apagava o `\n` do usuário junto com espaços/tabs). Dentro de cada
+ *  parágrafo, ainda quebra automaticamente por largura como antes. */
 function wrapText(text: string, maxChars: number, maxLines: number): string[] {
-  let remaining = text.replace(/\s+/g, " ").trim();
-  if (!remaining) return [];
+  if (!text.trim()) return [];
+  const paragraphs = text.replace(/\r\n/g, "\n").split("\n");
   const lines: string[] = [];
   const preferredMinimum = Math.floor(maxChars * 0.6);
+  let truncated = false;
 
-  while (remaining && lines.length < maxLines) {
-    if (remaining.length <= maxChars) {
-      lines.push(remaining);
-      remaining = "";
+  for (const paragraph of paragraphs) {
+    if (lines.length >= maxLines) {
+      truncated = true;
       break;
     }
-
-    const window = remaining.slice(0, maxChars + 1);
-    let breakAt = window.lastIndexOf(" ");
-    if (breakAt < preferredMinimum) breakAt = maxChars;
-
-    lines.push(remaining.slice(0, breakAt).trimEnd());
-    remaining = remaining.slice(breakAt).trimStart();
+    let remaining = paragraph.replace(/[^\S\n]+/g, " ").trim();
+    if (!remaining) {
+      lines.push("");
+      continue;
+    }
+    while (remaining) {
+      if (lines.length >= maxLines) {
+        truncated = true;
+        break;
+      }
+      if (remaining.length <= maxChars) {
+        lines.push(remaining);
+        remaining = "";
+        break;
+      }
+      const window = remaining.slice(0, maxChars + 1);
+      let breakAt = window.lastIndexOf(" ");
+      if (breakAt < preferredMinimum) breakAt = maxChars;
+      lines.push(remaining.slice(0, breakAt).trimEnd());
+      remaining = remaining.slice(breakAt).trimStart();
+    }
+    if (remaining) truncated = true;
   }
 
-  if (remaining && lines.length === maxLines) {
-    lines[maxLines - 1] = `${lines[maxLines - 1].replace(/\s*\.{3}$/, "").slice(0, Math.max(1, maxChars - 3))}...`;
+  if (truncated && lines.length > 0) {
+    const lastIndex = lines.length - 1;
+    lines[lastIndex] = `${lines[lastIndex].replace(/\s*\.{3}$/, "").slice(0, Math.max(1, maxChars - 3))}...`;
   }
   return lines;
 }
