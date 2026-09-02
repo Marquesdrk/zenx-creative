@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { RotateCcw, Volume2, VolumeX, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
 import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { CropEditor } from "./crop-editor";
 import { VideoFrame } from "./video-frame";
@@ -50,11 +50,19 @@ export function EditDrawer({
   profile,
   onClose,
   onSave,
+  positionLabel,
+  onPrev,
+  onNext,
 }: {
   item: BatchItem;
   profile: Profile;
   onClose: () => void;
   onSave: (item: BatchItem, applyToAll: boolean) => void;
+  /** Ex.: "3 de 8" — quantos vídeos tem o lote e qual está aberto agora. */
+  positionLabel?: string;
+  /** Ausente (undefined) quando não há vizinho nessa direção — some o botão. */
+  onPrev?: () => void;
+  onNext?: () => void;
 }) {
   const [draft, setDraft] = useState(item);
   const [applyToAll, setApplyToAll] = useState(false);
@@ -126,14 +134,39 @@ export function EditDrawer({
             <h2 className="text-base font-semibold text-foreground">Editar vídeo</h2>
             <p className="truncate text-xs text-muted">{draft.filename}</p>
           </div>
-          <button
-            type="button"
-            aria-label="Fechar"
-            onClick={onClose}
-            className="rounded-lg p-1.5 text-gray-400 hover:bg-card-hover hover:text-foreground"
-          >
-            <X size={18} />
-          </button>
+          <div className="flex items-center gap-3">
+            {(onPrev || onNext || positionLabel) && (
+              <div className="flex items-center gap-1.5 rounded-lg border border-border bg-[#141414] p-1">
+                <button
+                  type="button"
+                  aria-label="Vídeo anterior do lote"
+                  onClick={onPrev}
+                  disabled={!onPrev}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-gray-300 hover:bg-card-hover hover:text-foreground disabled:opacity-30"
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                {positionLabel && <span className="px-1 text-xs font-semibold text-muted">{positionLabel}</span>}
+                <button
+                  type="button"
+                  aria-label="Próximo vídeo do lote"
+                  onClick={onNext}
+                  disabled={!onNext}
+                  className="flex h-7 w-7 items-center justify-center rounded-md text-gray-300 hover:bg-card-hover hover:text-foreground disabled:opacity-30"
+                >
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              aria-label="Fechar"
+              onClick={onClose}
+              className="rounded-lg p-1.5 text-gray-400 hover:bg-card-hover hover:text-foreground"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-1 overflow-hidden">
@@ -567,7 +600,7 @@ export function EditDrawer({
               onClick={() => onSave(draft, applyToAll)}
               className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-background"
             >
-              Salvar
+              {onNext ? "Salvar e ir para o próximo" : "Salvar"}
             </button>
           </div>
         </div>

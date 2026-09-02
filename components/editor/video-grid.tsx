@@ -280,7 +280,7 @@ export function VideoGrid({
                           )}
                           <button type="button" onClick={() => firstItem && onEdit(firstItem)} className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-[#101014] px-3 text-xs font-semibold text-foreground hover:bg-card-hover">
                             <Pencil size={14} />
-                            Abrir lote
+                            Revisar vídeos
                           </button>
                           <button
                             type="button"
@@ -318,7 +318,7 @@ export function VideoGrid({
                 </div>
                 <div className="mt-4 flex gap-2">
                   <button type="button" onClick={() => firstItem && onEdit(firstItem)} className="flex-1 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white">
-                    Abrir lote
+                    Revisar vídeos
                   </button>
                   <button type="button" onClick={() => onDeleteItem(firstItem)} className="flex h-9 w-9 items-center justify-center rounded-lg border border-border text-muted hover:text-red-300">
                     <Trash2 size={14} />

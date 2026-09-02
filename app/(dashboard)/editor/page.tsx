@@ -376,7 +376,6 @@ export default function EditorPage() {
   }
 
   function handleSaveEdit(updated: BatchItem, applyToAll: boolean) {
-    setEditingItemId(null);
     setItems((current) =>
       current.map((item) => {
         if (item.id === updated.id) return updated;
@@ -386,6 +385,12 @@ export default function EditorPage() {
         return item;
       })
     );
+    // Avança pro próximo vídeo do mesmo lote em vez de fechar — sem isso, revisar um lote de
+    // N vídeos exigia reabrir "Abrir lote" (que só alcança o primeiro item) N vezes.
+    const siblings = items.filter((i) => i.batchId === updated.batchId);
+    const currentIndex = siblings.findIndex((i) => i.id === updated.id);
+    const next = siblings[currentIndex + 1];
+    setEditingItemId(next ? next.id : null);
   }
 
   const editingItem = items.find((i) => i.id === editingItemId) ?? null;
@@ -393,6 +398,10 @@ export default function EditorPage() {
   const editingProfile = editingBatch
     ? profiles.find((p) => p.id === editingBatch.profileId)
     : null;
+  const editingBatchItems = editingItem ? items.filter((i) => i.batchId === editingItem.batchId) : [];
+  const editingIndex = editingItem ? editingBatchItems.findIndex((i) => i.id === editingItem.id) : -1;
+  const editingPositionLabel =
+    editingBatchItems.length > 1 ? `${editingIndex + 1} de ${editingBatchItems.length}` : undefined;
 
   const completedItems = items.filter((i) => i.status === "COMPLETED");
   const awaitingReviewCount = items.filter((i) => i.status === "AWAITING_REVIEW").length;
@@ -457,6 +466,13 @@ export default function EditorPage() {
           profile={editingProfile}
           onClose={() => setEditingItemId(null)}
           onSave={handleSaveEdit}
+          positionLabel={editingPositionLabel}
+          onPrev={editingIndex > 0 ? () => setEditingItemId(editingBatchItems[editingIndex - 1].id) : undefined}
+          onNext={
+            editingIndex >= 0 && editingIndex < editingBatchItems.length - 1
+              ? () => setEditingItemId(editingBatchItems[editingIndex + 1].id)
+              : undefined
+          }
         />
       )}
     </div>
