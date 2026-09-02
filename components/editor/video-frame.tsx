@@ -4,14 +4,17 @@ import { BadgeCheck, User } from "lucide-react";
 import { EmojiText } from "./emoji-text";
 import {
   DEFAULT_X_STYLE_LAYOUT,
+  NEUTRAL_SOURCE_TRIM,
   resolveXStyleLayout,
   type CropBox,
   type FitMode,
   type Profile,
   type Rotation,
+  type SourceTrim,
   type WatermarkPosition,
   type XStyleVideoFrame,
 } from "@/lib/editor/types";
+import { contentTargetAspect } from "@/lib/editor/crop-geometry";
 
 const CONTENT_GRADIENT = "bg-gradient-to-br from-neutral-700 to-neutral-900";
 const DEFAULT_CROP: CropBox = { x: 0.5, y: 0.5 };
@@ -30,6 +33,8 @@ function VideoThumbnail({
   playing = false,
   onDragPosition,
   style,
+  sourceTrim = NEUTRAL_SOURCE_TRIM,
+  frameAspect,
 }: {
   url: string | null;
   className: string;
@@ -44,8 +49,15 @@ function VideoThumbnail({
   /** Quando presente, arrastar sobre o vídeo reposiciona o recorte ao vivo — mais direto
    *  que digitar em sliders pra alinhar o conteúdo. */
   onDragPosition?: (next: CropBox) => void;
+  /** Corte por borda do vídeo original (barras pretas gravadas), aplicado antes de cropBox/
+   *  fit — precisa das dimensões reais do vídeo pra ter efeito, por isso exige frameAspect. */
+  sourceTrim?: SourceTrim;
+  /** Proporção largura/altura da própria zona onde este vídeo é exibido — sem isso não dá
+   *  pra calcular corretamente como o recorte por borda interage com cover/contain. */
+  frameAspect?: number;
 }) {
   const [dragging, setDragging] = useState(false);
+  const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
 
   function handlePointerDown(event: React.PointerEvent<HTMLDivElement>) {
     if (!onDragPosition) return;
@@ -72,13 +84,74 @@ function VideoThumbnail({
   }
 
   if (url) {
+    const trim = sourceTrim;
+    const box = cropBox ?? DEFAULT_CROP;
+
+    // Sem dimensões reais do vídeo (ou sem frameAspect) não dá pra calcular o recorte por
+    // borda com precisão — usa o object-fit nativo enquanto isso, que já é o comportamento
+    // padrão de sempre (sourceTrim neutro reduz exatamente a isso).
+    let videoClassName = `h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"}`;
+    let videoStyle: CSSProperties = {
+      objectPosition: `${box.x * 100}% ${box.y * 100}%`,
+      transform: `rotate(${rotation}deg) scale(${cropZoom})`,
+      pointerEvents: onDragPosition ? "none" : undefined,
+    };
+
+    if (natural && frameAspect) {
+      const rotated = rotation === 90 || rotation === 270;
+      const rawWidth = rotated ? natural.height : natural.width;
+      const rawHeight = rotated ? natural.width : natural.height;
+      const trimmedWidth = rawWidth * (1 - trim.left - trim.right);
+      const trimmedHeight = rawHeight * (1 - trim.top - trim.bottom);
+      const trimmedAspect = trimmedWidth / Math.max(1, trimmedHeight);
+
+      let boxWidthPct: number;
+      let boxHeightPct: number;
+      if (fit === "cover") {
+        if (trimmedAspect > frameAspect) {
+          boxHeightPct = 100;
+          boxWidthPct = 100 * (trimmedAspect / frameAspect);
+        } else {
+          boxWidthPct = 100;
+          boxHeightPct = 100 * (frameAspect / trimmedAspect);
+        }
+        boxWidthPct *= cropZoom;
+        boxHeightPct *= cropZoom;
+      } else if (trimmedAspect > frameAspect) {
+        boxWidthPct = 100;
+        boxHeightPct = 100 * (frameAspect / trimmedAspect);
+      } else {
+        boxHeightPct = 100;
+        boxWidthPct = 100 * (trimmedAspect / frameAspect);
+      }
+
+      const boxLeftPct = (100 - boxWidthPct) * box.x;
+      const boxTopPct = (100 - boxHeightPct) * box.y;
+      const denomW = Math.max(0.1, 1 - trim.left - trim.right);
+      const denomH = Math.max(0.1, 1 - trim.top - trim.bottom);
+      const videoWidthPct = boxWidthPct / denomW;
+      const videoHeightPct = boxHeightPct / denomH;
+      const videoLeftPct = boxLeftPct - (trim.left / denomW) * boxWidthPct;
+      const videoTopPct = boxTopPct - (trim.top / denomH) * boxHeightPct;
+
+      videoClassName = "absolute";
+      videoStyle = {
+        left: `${videoLeftPct}%`,
+        top: `${videoTopPct}%`,
+        width: `${videoWidthPct}%`,
+        height: `${videoHeightPct}%`,
+        transform: `rotate(${rotation}deg)`,
+        pointerEvents: onDragPosition ? "none" : undefined,
+      };
+    }
+
     return (
       // O zoom escala o <video> via transform — sem um wrapper com overflow-hidden do
       // tamanho exato da zona, o vídeo ampliado vaza para fora dela (ex.: conteúdo
       // cobrindo a faixa de reação acima). O clipping tem que ser por zona, não só no
       // frame externo.
       <div
-        className={`${className} overflow-hidden ${onDragPosition ? "cursor-grab touch-none active:cursor-grabbing" : ""}`}
+        className={`${className} relative overflow-hidden ${onDragPosition ? "cursor-grab touch-none active:cursor-grabbing" : ""}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -93,19 +166,19 @@ function VideoThumbnail({
           playsInline
           preload="metadata"
           // Sem isso o vídeo pausado mostra um frame preto até o usuário interagir — busca um
-          // instante adiante pra prévia já nascer com uma imagem real do conteúdo.
+          // instante adiante pra prévia já nascer com uma imagem real do conteúdo. Também
+          // captura a resolução real, necessária pro cálculo do corte por borda (sourceTrim).
           onLoadedMetadata={(event) => {
             const video = event.currentTarget;
             if (Number.isFinite(video.duration)) {
               video.currentTime = Math.min(0.1, video.duration / 2);
             }
+            if (video.videoWidth && video.videoHeight) {
+              setNatural({ width: video.videoWidth, height: video.videoHeight });
+            }
           }}
-          className={`h-full w-full ${fit === "cover" ? "object-cover" : "object-contain"}`}
-          style={{
-            objectPosition: cropBox ? `${cropBox.x * 100}% ${cropBox.y * 100}%` : undefined,
-            transform: `rotate(${rotation}deg) scale(${cropZoom})`,
-            pointerEvents: onDragPosition ? "none" : undefined,
-          }}
+          className={videoClassName}
+          style={videoStyle}
         />
       </div>
     );
@@ -122,6 +195,7 @@ export function VideoFrame({
   contentCropZoom = 1,
   contentFit = "cover",
   contentRotation = 0,
+  contentSourceTrim = NEUTRAL_SOURCE_TRIM,
   playing = false,
   reactionMediaUrl = null,
   watermarkPosition = null,
@@ -137,6 +211,8 @@ export function VideoFrame({
   contentCropZoom?: number;
   contentFit?: FitMode;
   contentRotation?: Rotation;
+  /** Corte por borda do vídeo original (barras pretas gravadas no arquivo). */
+  contentSourceTrim?: SourceTrim;
   playing?: boolean;
   /** Só relevante quando profile.engine === "REACT". */
   reactionMediaUrl?: string | null;
@@ -149,6 +225,7 @@ export function VideoFrame({
 }) {
   const xStyleLayout = profile.engine === "X_STYLE" ? resolveXStyleLayout(profile.xStyleLayout) : DEFAULT_X_STYLE_LAYOUT;
   const xStyleVideo = xStyleVideoFrame ?? xStyleLayout.video;
+  const contentFrameAspect = contentTargetAspect(profile.engine, xStyleVideo);
 
   return (
     <div
@@ -167,6 +244,8 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
+            sourceTrim={contentSourceTrim}
+            frameAspect={contentFrameAspect}
             playing={playing}
             onDragPosition={onContentPositionChange}
             className="absolute inset-x-0 bottom-0 top-[36%] z-0"
@@ -204,6 +283,8 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
+            sourceTrim={contentSourceTrim}
+            frameAspect={contentFrameAspect}
             playing={playing}
             onDragPosition={onContentPositionChange}
             className="absolute bg-black"
@@ -251,6 +332,8 @@ export function VideoFrame({
             cropZoom={contentCropZoom}
             fit={contentFit}
             rotation={contentRotation}
+            sourceTrim={contentSourceTrim}
+            frameAspect={contentFrameAspect}
             playing={playing}
             onDragPosition={onContentPositionChange}
             className="absolute inset-0"

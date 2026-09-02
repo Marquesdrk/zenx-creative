@@ -123,6 +123,63 @@ async function ensureNestedFolder(drive: ReturnType<typeof google.drive>, segmen
   return parentId;
 }
 
+/** Igual a ensureNestedFolder, mas nunca cria nada — usado antes de listar arquivos, onde uma
+ *  pasta inexistente só significa "nenhum vídeo enviado ainda", não um erro. */
+async function findChildFolderId(
+  drive: ReturnType<typeof google.drive>,
+  name: string,
+  parentId: string | null
+): Promise<string | null> {
+  const parentClause = parentId ? ` and '${parentId}' in parents` : "";
+  const res = await drive.files.list({
+    q: `name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false${parentClause}`,
+    fields: "files(id)",
+  });
+  return res.data.files?.[0]?.id ?? null;
+}
+
+async function findNestedFolderId(
+  drive: ReturnType<typeof google.drive>,
+  segments: string[],
+  parentId: string | null = null
+): Promise<string | null> {
+  if (segments.length === 0) return parentId;
+  const [head, ...rest] = segments;
+  const id = await findChildFolderId(drive, head, parentId);
+  if (!id) return null;
+  return findNestedFolderId(drive, rest, id);
+}
+
+export type DriveFolderFile = { id: string; name: string; createdTime: string | null };
+
+/** Lista os arquivos de vídeo de uma cadeia de pastas (ex.: pasta de agendados de uma conta),
+ *  mais antigos primeiro — pensado pra distribuição automática de agendamento, onde a ordem de
+ *  publicação segue a ordem de chegada no Drive. Pasta inexistente devolve lista vazia. */
+export async function listFilesInFolder(folderSegments: string[]): Promise<DriveFolderFile[]> {
+  const client = await getOAuthClient();
+  if (!client) throw new Error("Google Drive não conectado — conecte em Configurações antes de listar arquivos.");
+  const drive = google.drive({ version: "v3", auth: client });
+  const folderId = await findNestedFolderId(drive, folderSegments);
+  if (!folderId) return [];
+  const res = await drive.files.list({
+    q: `'${folderId}' in parents and trashed = false and mimeType contains 'video/'`,
+    fields: "files(id, name, createdTime)",
+    orderBy: "createdTime",
+    pageSize: 1000,
+  });
+  return (res.data.files ?? []).map((file) => ({
+    id: file.id!,
+    name: file.name ?? "video.mp4",
+    createdTime: file.createdTime ?? null,
+  }));
+}
+
+/** Mesma pasta usada por uploadScheduledVideoToDrive — única fonte de verdade do nome, pra
+ *  listagem e upload nunca divergirem sobre onde procurar/gravar os vídeos de uma conta. */
+export function scheduledVideosFolderSegments(instagramUsername: string): string[] {
+  return [ROOT_FOLDER_NAME, `@${instagramUsername.replace(/^@/, "")}`];
+}
+
 /** Sobe um arquivo qualquer para uma cadeia de pastas do Drive (criando-a se preciso) e
  *  devolve o fileId — usado tanto pelos vídeos agendados quanto pelos documentos/imagens do
  *  Criador de Avatar (lib/server/avatar-pipeline.ts). Nunca duplica o arquivo em outro storage. */
@@ -153,10 +210,7 @@ export async function uploadScheduledVideoToDrive(
   mimeType: string,
   instagramUsername: string
 ): Promise<{ fileId: string; fileName: string }> {
-  return uploadFileToDriveFolder(fileBuffer, filename, mimeType, [
-    ROOT_FOLDER_NAME,
-    `@${instagramUsername.replace(/^@/, "")}`,
-  ]);
+  return uploadFileToDriveFolder(fileBuffer, filename, mimeType, scheduledVideosFolderSegments(instagramUsername));
 }
 
 export type DriveFileStream = {

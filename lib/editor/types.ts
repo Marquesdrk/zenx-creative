@@ -14,6 +14,12 @@ export type CropBox = { x: number; y: number };
 /** Como o vídeo importado preenche o quadro do template. */
 export type FitMode = "cover" | "contain";
 export type Rotation = 0 | 90 | 180 | 270;
+/** Fração (0 a ~0.4) aparada de cada borda do vídeo original, antes de qualquer recorte/zoom/
+ *  preenchimento — remove barras pretas gravadas no arquivo sem forçar proporção nem cortar
+ *  conteúdo real, ao contrário de cropBox/cropZoom (que sempre travam na proporção alvo). */
+export type SourceTrim = { top: number; bottom: number; left: number; right: number };
+
+export const NEUTRAL_SOURCE_TRIM: SourceTrim = { top: 0, bottom: 0, left: 0, right: 0 };
 
 export type ReactProfile = {
   id: string;
@@ -146,6 +152,10 @@ export type ManualOverrides = {
   /** Zoom aplicado sobre o recorte (1 = sem zoom), permitindo um "recorte livre" combinando
    *  posição (cropBox) e escala. */
   cropZoom: number;
+  /** Corte independente por borda (topo/base/esquerda/direita) do vídeo original — pensado
+   *  para remover barras pretas gravadas no arquivo em qualquer modo de preenchimento, sem
+   *  o travamento de proporção que cropBox/cropZoom têm. */
+  sourceTrim: SourceTrim;
   fit: FitMode;
   rotation: Rotation;
   /** Corte de entrada/saída, em segundos, sobre o vídeo original. trimEnd null = até o fim. */
@@ -167,6 +177,7 @@ export function createDefaultManualOverrides(
     title: params.title ?? "",
     cropBox: { x: 0.5, y: 0.5 },
     cropZoom: 1,
+    sourceTrim: { ...NEUTRAL_SOURCE_TRIM },
     fit: "cover",
     rotation: 0,
     trimStart: 0,
@@ -191,6 +202,9 @@ export type SourceAnalysis = {
    *  teria efeito quando a origem já preenche o quadro alvo por completo (zoom 1x = sem
    *  folga pra mover). */
   suggestedZoom: number;
+  /** Corte por borda sugerido a partir das mesmas barras detectadas — usado como o ajuste
+   *  automático padrão, por remover as barras sem forçar proporção nem perder conteúdo. */
+  suggestedSourceTrim: SourceTrim;
 };
 
 export type BatchItem = {

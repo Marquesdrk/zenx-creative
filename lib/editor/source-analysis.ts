@@ -1,4 +1,4 @@
-import type { CropBox, SourceAnalysis } from "./types";
+import { NEUTRAL_SOURCE_TRIM, type CropBox, type SourceAnalysis, type SourceTrim } from "./types";
 
 const MAX_BORDER_SCAN_RATIO = 0.22;
 const SAMPLE_STEP = 8;
@@ -10,6 +10,7 @@ const NEUTRAL_ANALYSIS: Omit<SourceAnalysis, "width" | "height" | "aspectRatio">
   hasLetterboxing: false,
   suggestedCropBox: { x: 0.5, y: 0.5 },
   suggestedZoom: 1,
+  suggestedSourceTrim: { ...NEUTRAL_SOURCE_TRIM },
 };
 
 function clamp(value: number, min: number, max: number) {
@@ -85,7 +86,7 @@ export function analyzeFrame(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number
-): { hasLetterboxing: boolean; suggestedCropBox: CropBox; suggestedZoom: number } {
+): { hasLetterboxing: boolean; suggestedCropBox: CropBox; suggestedZoom: number; suggestedSourceTrim: SourceTrim } {
   const { top, bottom, left, right } = detectBorders(
     ctx.getImageData(0, 0, width, height).data,
     width,
@@ -103,6 +104,12 @@ export function analyzeFrame(
     hasLetterboxing,
     suggestedCropBox: { x: clamp(centerX, 0, 1), y: clamp(centerY, 0, 1) },
     suggestedZoom,
+    suggestedSourceTrim: {
+      top: top / height,
+      bottom: bottom / height,
+      left: left / width,
+      right: right / width,
+    },
   };
 }
 
@@ -144,8 +151,12 @@ export function analyzeVideoSource(url: string): Promise<SourceAnalysis> {
         }
         try {
           ctx.drawImage(video, 0, 0, width, height);
-          const { hasLetterboxing, suggestedCropBox, suggestedZoom } = analyzeFrame(ctx, width, height);
-          finish({ ...base, hasLetterboxing, suggestedCropBox, suggestedZoom });
+          const { hasLetterboxing, suggestedCropBox, suggestedZoom, suggestedSourceTrim } = analyzeFrame(
+            ctx,
+            width,
+            height
+          );
+          finish({ ...base, hasLetterboxing, suggestedCropBox, suggestedZoom, suggestedSourceTrim });
         } catch {
           finish({ ...base, ...NEUTRAL_ANALYSIS });
         }

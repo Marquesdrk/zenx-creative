@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, Download, Filter, Grid2X2, List, Loader2, MoreVertical, Pencil, Search, Trash2 } from "lucide-react";
+import { CheckCircle2, Download, Filter, Grid2X2, HardDrive, List, Loader2, MoreVertical, Pencil, Search, Trash2 } from "lucide-react";
 import { VideoFrame } from "./video-frame";
 import { AppCard } from "@/components/ui/app-card";
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -73,6 +73,7 @@ function BatchPreview({ item, profile }: { item: BatchItem | null; profile: Prof
           contentCropZoom={item.manualOverrides.cropZoom}
           contentFit={item.manualOverrides.fit}
           contentRotation={item.manualOverrides.rotation}
+          contentSourceTrim={item.manualOverrides.sourceTrim}
           watermarkPosition={item.manualOverrides.watermarkPosition}
           xStyleVideoFrame={item.manualOverrides.xStyleVideoFrame}
           reactionMediaUrl={
@@ -94,6 +95,7 @@ export function VideoGrid({
   onDeleteItem,
   onConfirmBatch,
   onExportBatch,
+  onSendToDrive,
   exportingBatchId,
   exportProgressLabel,
 }: {
@@ -104,6 +106,7 @@ export function VideoGrid({
   onDeleteItem: (item: BatchItem) => void;
   onConfirmBatch: (batchId: string) => void;
   onExportBatch: (batchId: string) => void;
+  onSendToDrive: (batchId: string) => void;
   exportingBatchId: string | null;
   exportProgressLabel?: string | null;
 }) {
@@ -290,6 +293,15 @@ export function VideoGrid({
                           >
                             {exportingBatchId === batch.id ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
                             {exportingBatchId === batch.id && exportProgressLabel ? exportProgressLabel : "Exportar"}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onSendToDrive(batch.id)}
+                            disabled={completedCount === 0}
+                            className="inline-flex h-9 items-center gap-2 rounded-lg border border-border bg-[#101014] px-3 text-xs font-semibold text-foreground hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <HardDrive size={14} />
+                            Enviar ao Drive
                           </button>
                           <button type="button" aria-label="Mais ações" className="flex h-9 w-9 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-card-hover">
                             <MoreVertical size={15} />

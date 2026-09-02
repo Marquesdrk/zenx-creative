@@ -7,7 +7,7 @@ import { get } from "@vercel/blob";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
+import { applySourceTrim, computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
 import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
 import { resolveXStyleLayout, type BatchItem, type CropBox, type Profile } from "@/lib/editor/types";
 import { emojiAssetCode, isEmojiSegment, splitGraphemes, whatsappEmojiFilename } from "@/lib/emoji/whatsapp";
@@ -152,9 +152,23 @@ function buildContentFilters(
   targetWidth: number,
   targetHeight: number
 ): string[] {
-  const { rotation, fit, cropBox, cropZoom } = item.manualOverrides;
-  const filters = [...(ROTATE_FILTERS[rotation] ?? [])];
-  const { width: effWidth, height: effHeight } = effectiveDimensions(source.width, source.height, rotation);
+  const { rotation, fit, cropBox, cropZoom, sourceTrim } = item.manualOverrides;
+  const trim = sourceTrim ?? { top: 0, bottom: 0, left: 0, right: 0 };
+  const filters: string[] = [];
+
+  // Aparar barras gravadas no arquivo original acontece antes de qualquer rotação/recorte —
+  // opera sempre sobre as dimensões cruas da fonte, nunca sobre as já rotacionadas/recortadas.
+  let sourceWidth = source.width;
+  let sourceHeight = source.height;
+  if (trim.top > 0 || trim.bottom > 0 || trim.left > 0 || trim.right > 0) {
+    const trimRect = applySourceTrim(source.width, source.height, trim);
+    filters.push(`crop=${trimRect.width}:${trimRect.height}:${trimRect.x}:${trimRect.y}`);
+    sourceWidth = trimRect.width;
+    sourceHeight = trimRect.height;
+  }
+
+  filters.push(...(ROTATE_FILTERS[rotation] ?? []));
+  const { width: effWidth, height: effHeight } = effectiveDimensions(sourceWidth, sourceHeight, rotation);
 
   if (fit === "contain") {
     // Posição do conteúdo dentro das barras (mesma lógica do object-position no preview) —

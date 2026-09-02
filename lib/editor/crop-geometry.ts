@@ -1,9 +1,42 @@
-import type { CropBox, Rotation } from "./types";
+import type { CropBox, Engine, Rotation, SourceTrim, XStyleVideoFrame } from "./types";
 
 export type Rect = { x: number; y: number; width: number; height: number };
 
+const OUTPUT_WIDTH = 1080;
+const OUTPUT_HEIGHT = 1920;
+const REACT_REACTION_HEIGHT_RATIO = 0.36;
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+/** Proporção alvo do conteúdo por engine — mesmo cálculo usado pelo editor visual de recorte
+ *  (components/editor/crop-editor.tsx), pela prévia (components/editor/video-frame.tsx) e pelo
+ *  render real (lib/server/render.ts). Única fonte de verdade: um valor errado aqui faz a
+ *  prévia e o vídeo final divergirem silenciosamente. */
+export function contentTargetAspect(engine: Engine, xStyleVideoFrame?: Pick<XStyleVideoFrame, "width" | "height"> | null): number {
+  if (engine === "REACT") {
+    const topHeight = Math.round(OUTPUT_HEIGHT * REACT_REACTION_HEIGHT_RATIO);
+    return OUTPUT_WIDTH / (OUTPUT_HEIGHT - topHeight);
+  }
+  if (engine === "X_STYLE" && xStyleVideoFrame) {
+    return xStyleVideoFrame.width / xStyleVideoFrame.height;
+  }
+  return OUTPUT_WIDTH / OUTPUT_HEIGHT;
+}
+
+/** Dimensões de pixel após aparar as bordas detectadas/definidas manualmente (barras pretas
+ *  gravadas no arquivo original) — aplicado antes de qualquer recorte/zoom/preenchimento,
+ *  então nunca força proporção nem "come" conteúdo real: só remove exatamente a faixa marcada. */
+export function applySourceTrim(width: number, height: number, trim: SourceTrim): Rect {
+  const trimmedWidth = Math.max(2, Math.round(width * (1 - trim.left - trim.right)));
+  const trimmedHeight = Math.max(2, Math.round(height * (1 - trim.top - trim.bottom)));
+  return {
+    x: Math.round(width * trim.left),
+    y: Math.round(height * trim.top),
+    width: trimmedWidth,
+    height: trimmedHeight,
+  };
 }
 
 /** Dimensões efetivas após rotação — 90°/270° trocam largura por altura. Usado tanto pelo

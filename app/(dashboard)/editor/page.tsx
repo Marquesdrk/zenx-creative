@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { CalendarDays, CheckCircle2, Folder, Inbox, PlayCircle } from "lucide-react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
 import { EditDrawer } from "@/components/editor/edit-drawer";
+import { SendToDriveModal } from "@/components/editor/send-to-drive-modal";
 import { VideoGrid } from "@/components/editor/video-grid";
 import { Topbar } from "@/components/shell/topbar";
 import { PageHeader } from "@/components/ui/page-header";
@@ -170,6 +171,10 @@ export default function EditorPage() {
   const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
   const [exportProgressLabel, setExportProgressLabel] = useState<string | null>(null);
   const [pageError, setPageError] = useState<string | null>(null);
+  const [sendToDriveBatchId, setSendToDriveBatchId] = useState<string | null>(null);
+  const [sendingToDriveBatchId, setSendingToDriveBatchId] = useState<string | null>(null);
+  const [sendToDriveProgressLabel, setSendToDriveProgressLabel] = useState<string | null>(null);
+  const [sendToDriveError, setSendToDriveError] = useState<string | null>(null);
   const fileRefs = useRef(new Map<string, File>());
   const objectUrlRefs = useRef(new Set<string>());
 
@@ -252,7 +257,7 @@ export default function EditorPage() {
         status: "AWAITING_REVIEW",
         sourceAnalysis: analysis,
         manualOverrides: analysis
-          ? { ...item.manualOverrides, cropBox: analysis.suggestedCropBox, cropZoom: analysis.suggestedZoom }
+          ? { ...item.manualOverrides, sourceTrim: analysis.suggestedSourceTrim }
           : item.manualOverrides,
       };
       setItems((current) => current.map((i) => (i.id === item.id ? { ...i, ...patch } : i)));
@@ -375,6 +380,92 @@ export default function EditorPage() {
     }
   }
 
+  /** Mesma etapa de render de handleExportBatch (upload temporário + /api/batches/export-local
+   *  por item), mas em vez de zipar e baixar localmente, sobe cada vídeo renderizado direto pra
+   *  pasta do Drive da conta escolhida via /api/scheduled-posts/upload-to-drive — o mesmo
+   *  endpoint já usado pelo agendamento individual, então o vídeo cai exatamente onde o
+   *  agendamento automático em massa (tela Publicar) depois vai procurar. */
+  async function handleSendBatchToDrive(batchId: string, socialAccountId: string) {
+    const batch = batches.find((candidate) => candidate.id === batchId);
+    const profile = batch ? profiles.find((candidate) => candidate.id === batch.profileId) : null;
+    const batchItems = items.filter((item) => item.batchId === batchId);
+    if (!batch || !profile || batchItems.length === 0) return;
+
+    const missingFiles = batchItems.filter((item) => !fileRefs.current.has(item.id));
+    if (missingFiles.length > 0) {
+      setSendToDriveError("Um ou mais arquivos originais não estão mais disponíveis. Crie um novo lote sem recarregar a página.");
+      return;
+    }
+
+    setSendingToDriveBatchId(batchId);
+    setSendToDriveProgressLabel(`Preparando 0/${batchItems.length}`);
+    setSendToDriveError(null);
+    let temporaryProfileBlobUrls: string[] = [];
+    try {
+      const exportId = crypto.randomUUID();
+      const uploadedProfileAssets = await uploadTemporaryProfileAssets(profile, batchId, exportId);
+      const renderProfile = uploadedProfileAssets.profile;
+      temporaryProfileBlobUrls = uploadedProfileAssets.blobUrls;
+      let uploaded = 0;
+
+      const uploadedItems = await mapWithConcurrency(
+        batchItems.map((item) => ({ item })),
+        MAX_PARALLEL_UPLOADS,
+        async ({ item }) => {
+          const file = fileRefs.current.get(item.id);
+          if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
+          const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
+            access: "private",
+            handleUploadUrl: "/api/blob/upload",
+            multipart: true,
+            contentType: file.type || "video/mp4",
+          });
+          uploaded += 1;
+          setSendToDriveProgressLabel(`Preparando ${uploaded}/${batchItems.length}`);
+          return { ...item, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname };
+        }
+      );
+
+      let sent = 0;
+      setSendToDriveProgressLabel(`Enviando 0/${batchItems.length}`);
+      await mapWithConcurrency(uploadedItems, MAX_PARALLEL_RENDERS, async (item) => {
+        const res = await fetch("/api/batches/export-local", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ batchId, profile: renderProfile, response: "video", items: [item] }),
+        });
+        if (!res.ok) {
+          const message = await responseErrorMessage(res, `Falha ao renderizar "${item.filename}" (${res.status}).`);
+          throw new Error(message);
+        }
+        const content = new Uint8Array(await res.arrayBuffer());
+        const renderedFile = new File([content], zipVideoFilename(item.filename), { type: "video/mp4" });
+
+        const formData = new FormData();
+        formData.append("file", renderedFile);
+        formData.append("socialAccountId", socialAccountId);
+        const driveRes = await fetch("/api/scheduled-posts/upload-to-drive", { method: "POST", body: formData });
+        if (!driveRes.ok) {
+          const data = await driveRes.json().catch(() => ({}) as { error?: string });
+          throw new Error(data.error || `Falha ao enviar "${item.filename}" para o Google Drive.`);
+        }
+        sent += 1;
+        setSendToDriveProgressLabel(`Enviando ${sent}/${batchItems.length}`);
+      });
+
+      batchItems.forEach(removeLocalItemFiles);
+      setBatches((current) => current.filter((candidate) => candidate.id !== batchId));
+      setItems((current) => current.filter((item) => item.batchId !== batchId));
+      setSendToDriveBatchId(null);
+    } catch (error) {
+      setSendToDriveError(error instanceof Error ? error.message : "Falha ao enviar o lote para o Google Drive.");
+    } finally {
+      await deleteTemporaryBlobs(temporaryProfileBlobUrls);
+      setSendingToDriveBatchId(null);
+      setSendToDriveProgressLabel(null);
+    }
+  }
+
   function handleSaveEdit(updated: BatchItem, applyToAll: boolean) {
     setItems((current) =>
       current.map((item) => {
@@ -447,9 +538,23 @@ export default function EditorPage() {
         onDeleteItem={handleDeleteItem}
         onConfirmBatch={handleConfirmBatch}
         onExportBatch={handleExportBatch}
+        onSendToDrive={(batchId) => {
+          setSendToDriveError(null);
+          setSendToDriveBatchId(batchId);
+        }}
         exportingBatchId={exportingBatchId}
         exportProgressLabel={exportProgressLabel}
       />
+
+      {sendToDriveBatchId && (
+        <SendToDriveModal
+          onClose={() => setSendToDriveBatchId(null)}
+          onConfirm={(socialAccountId) => handleSendBatchToDrive(sendToDriveBatchId, socialAccountId)}
+          sending={sendingToDriveBatchId === sendToDriveBatchId}
+          progressLabel={sendToDriveProgressLabel}
+          error={sendToDriveError}
+        />
+      )}
 
       {isBatchModalOpen && (
         <BatchModal

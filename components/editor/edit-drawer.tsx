@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
+import { contentTargetAspect } from "@/lib/editor/crop-geometry";
 import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { CropEditor } from "./crop-editor";
 import { VideoFrame } from "./video-frame";
@@ -9,9 +10,9 @@ import { WatermarkCanvas } from "./watermark-canvas";
 import {
   resolveXStyleLayout,
   type BatchItem,
-  type Engine,
   type Profile,
   type Rotation,
+  type SourceTrim,
   type XStyleVideoFrame,
 } from "@/lib/editor/types";
 
@@ -19,21 +20,14 @@ const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 const OUTPUT_WIDTH = 1080;
 const OUTPUT_HEIGHT = 1920;
 const MIN_X_STYLE_FRAME_SIZE = 80;
-const REACT_REACTION_HEIGHT_RATIO = 0.36;
+const MAX_TRIM_PER_EDGE = 0.4;
 
-/** Mesma proporção usada pelo render real (lib/server/render.ts) por engine — o editor
- *  visual de recorte precisa mirar exatamente nisso, não em qualquer aspecto genérico. */
-function contentTargetAspect(engine: Engine, xStyleVideoFrame?: XStyleVideoFrame | null): number {
-  if (engine === "REACT") {
-    const topHeight = Math.round(OUTPUT_HEIGHT * REACT_REACTION_HEIGHT_RATIO);
-    return OUTPUT_WIDTH / (OUTPUT_HEIGHT - topHeight);
-  }
-  if (engine === "X_STYLE") {
-    const frame = xStyleVideoFrame ?? resolveXStyleLayout().video;
-    return frame.width / frame.height;
-  }
-  return OUTPUT_WIDTH / OUTPUT_HEIGHT;
-}
+const TRIM_EDGES: { key: keyof SourceTrim; label: string }[] = [
+  { key: "top", label: "Topo" },
+  { key: "bottom", label: "Base" },
+  { key: "left", label: "Esquerda" },
+  { key: "right", label: "Direita" },
+];
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60);
@@ -93,6 +87,13 @@ export function EditDrawer({
     }));
   }
 
+  function updateSourceTrim(edge: keyof SourceTrim, value: number) {
+    const current = overrides.sourceTrim;
+    const opposite = edge === "top" ? current.bottom : edge === "bottom" ? current.top : edge === "left" ? current.right : current.left;
+    const clamped = Math.min(value, Math.max(0, 1 - opposite - 0.1));
+    updateOverrides({ sourceTrim: { ...current, [edge]: clamped } });
+  }
+
   const defaultXStyleVideoFrame =
     profile.engine === "X_STYLE" ? resolveXStyleLayout(profile.xStyleLayout).video : null;
   const xStyleVideoFrame = overrides.xStyleVideoFrame ?? defaultXStyleVideoFrame;
@@ -119,8 +120,7 @@ export function EditDrawer({
       sourceAnalysis: analysis,
       manualOverrides: {
         ...current.manualOverrides,
-        cropBox: analysis.suggestedCropBox,
-        cropZoom: analysis.suggestedZoom,
+        sourceTrim: analysis.suggestedSourceTrim,
       },
     }));
     setRedetecting(false);
@@ -199,6 +199,7 @@ export function EditDrawer({
                     contentCropZoom={overrides.cropZoom}
                     contentFit={overrides.fit}
                     contentRotation={overrides.rotation}
+                    contentSourceTrim={overrides.sourceTrim}
                     playing
                     xStyleVideoFrame={overrides.xStyleVideoFrame}
                     onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
@@ -216,6 +217,7 @@ export function EditDrawer({
                     contentCropZoom={overrides.cropZoom}
                     contentFit={overrides.fit}
                     contentRotation={overrides.rotation}
+                    contentSourceTrim={overrides.sourceTrim}
                     onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
                     watermarkPosition={overrides.watermarkPosition}
                     onWatermarkPositionChange={(watermarkPosition) => updateOverrides({ watermarkPosition })}
@@ -230,6 +232,7 @@ export function EditDrawer({
                     contentCropZoom={overrides.cropZoom}
                     contentFit={overrides.fit}
                     contentRotation={overrides.rotation}
+                    contentSourceTrim={overrides.sourceTrim}
                     playing
                     xStyleVideoFrame={overrides.xStyleVideoFrame}
                     onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
@@ -436,6 +439,47 @@ export function EditDrawer({
                   />
                 </div>
               )}
+
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <SectionLabel>Remover bordas do vídeo original</SectionLabel>
+                  {draft.sourceAnalysis?.hasLetterboxing && (
+                    <button
+                      type="button"
+                      onClick={() => updateOverrides({ sourceTrim: draft.sourceAnalysis!.suggestedSourceTrim })}
+                      className="text-[11px] font-semibold text-accent"
+                    >
+                      Usar detecção automática
+                    </button>
+                  )}
+                </div>
+                <p className="mb-2 -mt-1 text-[11px] text-muted">
+                  Apara faixas pretas gravadas no arquivo (topo, base, laterais) antes de qualquer
+                  recorte — funciona em Preencher e em Ajustar, sem cortar conteúdo real.
+                </p>
+                <div className="grid grid-cols-2 gap-3">
+                  {TRIM_EDGES.map(({ key, label }) => (
+                    <label key={key} className="rounded-lg border border-border bg-card p-2.5">
+                      <span className="mb-1.5 flex items-center justify-between text-[11px] font-semibold text-muted">
+                        {label}
+                        <span className="tabular-nums text-gray-400">
+                          {Math.round(overrides.sourceTrim[key] * 100)}%
+                        </span>
+                      </span>
+                      <input
+                        aria-label={`Aparar ${label.toLowerCase()}`}
+                        type="range"
+                        min={0}
+                        max={MAX_TRIM_PER_EDGE}
+                        step={0.01}
+                        value={overrides.sourceTrim[key]}
+                        onChange={(event) => updateSourceTrim(key, Number(event.target.value))}
+                        className="w-full accent-accent"
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
 
               <div>
                 <div className="mb-2 flex items-center justify-between">

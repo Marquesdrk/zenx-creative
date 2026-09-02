@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { BulkScheduleComposer } from "@/components/meta/bulk-schedule-composer";
 import { ScheduledPostComposer } from "@/components/meta/scheduled-post-composer";
 import { ScheduledPostQueue } from "@/components/meta/scheduled-post-queue";
 import { StatusSummary } from "@/components/meta/status-summary";
@@ -61,7 +62,10 @@ export default function PublicarPage() {
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_360px]">
-        <ScheduledPostComposer accounts={socialAccounts} onCreated={refresh} />
+        <div className="flex flex-col gap-4">
+          <ScheduledPostComposer accounts={socialAccounts} onCreated={refresh} />
+          <BulkScheduleComposer accounts={socialAccounts} onCreated={refresh} />
+        </div>
         <ScheduledPostQueue
           posts={posts}
           accounts={accounts}
