@@ -6,6 +6,8 @@ import type { BatchItem, Profile } from "@/lib/editor/types";
 import { renderBatchItem } from "@/lib/server/render";
 import { deletePublicUrl, generatedFileUrl, generatedFolder, publicUrlToPath, sanitizeFilename } from "@/lib/server/public-files";
 import { createZip, zipArchiveFilename, zipVideoFilename } from "@/lib/server/zip";
+import { socialAccountsRepo } from "@/lib/server/meta/db";
+import { uploadScheduledVideoToDrive } from "@/lib/server/google-drive";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -15,7 +17,9 @@ type ExportPayload = {
   batchId: string;
   profile: Profile;
   items: Array<BatchItem & { blobUrl?: string; blobDownloadUrl?: string; blobPathname?: string }>;
-  response?: "zip" | "video";
+  response?: "zip" | "video" | "drive";
+  /** Obrigatório quando response = "drive" — define a pasta de destino no Drive. */
+  socialAccountId?: string;
 };
 
 function isPayload(value: unknown): value is ExportPayload {
@@ -99,8 +103,11 @@ export async function POST(request: Request) {
     const { payload, formData } = await parseRequest(request);
     const responseMode = payload.response ?? "zip";
 
-    if (responseMode === "video" && payload.items.length !== 1) {
+    if ((responseMode === "video" || responseMode === "drive") && payload.items.length !== 1) {
       return NextResponse.json({ error: "A exportação individual aceita apenas um vídeo por chamada." }, { status: 400 });
+    }
+    if (responseMode === "drive" && !payload.socialAccountId) {
+      return NextResponse.json({ error: "Informe a conta de destino no Drive." }, { status: 400 });
     }
 
     async function renderItem(item: ExportPayload["items"][number], index: number) {
@@ -149,6 +156,25 @@ export async function POST(request: Request) {
           "Content-Disposition": `attachment; filename="${rendered.videoFilename}"`,
         },
       });
+    }
+
+    if (responseMode === "drive") {
+      // Sobe direto pro Drive aqui dentro da mesma function, sem devolver os bytes pro
+      // navegador — evita o hop extra por Vercel Blob que estourava a cota de 1GB do Hobby em
+      // lotes com vídeos grandes (o vídeo original ainda passa pelo Blob até aqui, mas some
+      // assim que renderItem termina, via blobUrlsToDelete no finally abaixo).
+      const account = await socialAccountsRepo.get(payload.socialAccountId!);
+      if (!account) {
+        return NextResponse.json({ error: "Conta de destino não encontrada." }, { status: 404 });
+      }
+      const rendered = await renderItem(payload.items[0], 0);
+      const result = await uploadScheduledVideoToDrive(
+        rendered.content,
+        rendered.videoFilename,
+        "video/mp4",
+        account.username || account.accountName
+      );
+      return NextResponse.json({ driveFileId: result.fileId, driveFileName: result.fileName });
     }
 
     const renderedItems = await mapWithConcurrency(

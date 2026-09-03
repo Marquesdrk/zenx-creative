@@ -380,11 +380,13 @@ export default function EditorPage() {
     }
   }
 
-  /** Mesma etapa de render de handleExportBatch (upload temporário + /api/batches/export-local
-   *  por item), mas em vez de zipar e baixar localmente, sobe cada vídeo renderizado direto pra
-   *  pasta do Drive da conta escolhida via /api/scheduled-posts/upload-to-drive — o mesmo
-   *  endpoint já usado pelo agendamento individual, então o vídeo cai exatamente onde o
-   *  agendamento automático em massa (tela Publicar) depois vai procurar. */
+  /** Sobe cada vídeo direto pro Drive, um de cada vez (baixa concorrência de propósito): o
+   *  original vai pro Blob só como uma ponte de curtíssima duração pra contornar o limite de
+   *  ~4.5MB de corpo de requisição da Vercel — /api/batches/export-local já renderiza E sobe
+   *  pro Drive dentro da mesma function (response: "drive"), sem devolver os bytes pro
+   *  navegador, então nenhum vídeo renderizado passa pelo Blob. O original some assim que o
+   *  render termina (limpo pela própria rota). Processar um item por vez, em vez de subir
+   *  todo o lote pro Blob de uma vez, evita estourar a cota de 1GB do Hobby com lotes grandes. */
   async function handleSendBatchToDrive(batchId: string, socialAccountId: string) {
     const batch = batches.find((candidate) => candidate.id === batchId);
     const profile = batch ? profiles.find((candidate) => candidate.id === batch.profileId) : null;
@@ -398,68 +400,35 @@ export default function EditorPage() {
     }
 
     setSendingToDriveBatchId(batchId);
-    setSendToDriveProgressLabel(`Preparando 0/${batchItems.length}`);
+    setSendToDriveProgressLabel(`Enviando 0/${batchItems.length}`);
     setSendToDriveError(null);
     let temporaryProfileBlobUrls: string[] = [];
-    const temporaryRenderedBlobUrls: string[] = [];
     try {
       const exportId = crypto.randomUUID();
       const uploadedProfileAssets = await uploadTemporaryProfileAssets(profile, batchId, exportId);
       const renderProfile = uploadedProfileAssets.profile;
       temporaryProfileBlobUrls = uploadedProfileAssets.blobUrls;
-      let uploaded = 0;
-
-      const uploadedItems = await mapWithConcurrency(
-        batchItems.map((item) => ({ item })),
-        MAX_PARALLEL_UPLOADS,
-        async ({ item }) => {
-          const file = fileRefs.current.get(item.id);
-          if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
-          const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
-            access: "private",
-            handleUploadUrl: "/api/blob/upload",
-            multipart: true,
-            contentType: file.type || "video/mp4",
-          });
-          uploaded += 1;
-          setSendToDriveProgressLabel(`Preparando ${uploaded}/${batchItems.length}`);
-          return { ...item, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname };
-        }
-      );
 
       let sent = 0;
-      setSendToDriveProgressLabel(`Enviando 0/${batchItems.length}`);
-      await mapWithConcurrency(uploadedItems, MAX_PARALLEL_RENDERS, async (item) => {
+      await mapWithConcurrency(batchItems, MAX_PARALLEL_RENDERS, async (item) => {
+        const file = fileRefs.current.get(item.id);
+        if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
+        const blob = await upload(`editor-batches/${batchId}/${exportId}/${item.id}-${file.name}`, file, {
+          access: "private",
+          handleUploadUrl: "/api/blob/upload",
+          multipart: true,
+          contentType: file.type || "video/mp4",
+        });
+        const itemWithBlob = { ...item, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname };
+
         const res = await fetch("/api/batches/export-local", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ batchId, profile: renderProfile, response: "video", items: [item] }),
+          body: JSON.stringify({ batchId, profile: renderProfile, response: "drive", socialAccountId, items: [itemWithBlob] }),
         });
         if (!res.ok) {
-          const message = await responseErrorMessage(res, `Falha ao renderizar "${item.filename}" (${res.status}).`);
+          const message = await responseErrorMessage(res, `Falha ao enviar "${item.filename}" para o Google Drive (${res.status}).`);
           throw new Error(message);
-        }
-        const content = new Uint8Array(await res.arrayBuffer());
-        const renderedFilename = zipVideoFilename(item.filename);
-
-        // Vídeo renderizado sobe pro Blob primeiro (direto do navegador, sem passar pela
-        // function) — mandar os bytes direto no corpo de /upload-to-drive estoura o limite
-        // fixo de ~4.5MB de requisição da Vercel pra qualquer vídeo de verdade (erro 413).
-        const renderedBlob = await upload(
-          `editor-batches/${batchId}/${exportId}/rendered-${item.id}.mp4`,
-          new File([content], renderedFilename, { type: "video/mp4" }),
-          { access: "private", handleUploadUrl: "/api/blob/upload", multipart: true, contentType: "video/mp4" }
-        );
-        temporaryRenderedBlobUrls.push(renderedBlob.url);
-
-        const driveRes = await fetch("/api/scheduled-posts/upload-to-drive", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ blobUrl: renderedBlob.url, filename: renderedFilename, socialAccountId }),
-        });
-        if (!driveRes.ok) {
-          const data = await driveRes.json().catch(() => ({}) as { error?: string });
-          throw new Error(data.error || `Falha ao enviar "${item.filename}" para o Google Drive.`);
         }
         sent += 1;
         setSendToDriveProgressLabel(`Enviando ${sent}/${batchItems.length}`);
@@ -472,7 +441,7 @@ export default function EditorPage() {
     } catch (error) {
       setSendToDriveError(error instanceof Error ? error.message : "Falha ao enviar o lote para o Google Drive.");
     } finally {
-      await deleteTemporaryBlobs([...temporaryProfileBlobUrls, ...temporaryRenderedBlobUrls]);
+      await deleteTemporaryBlobs(temporaryProfileBlobUrls);
       setSendingToDriveBatchId(null);
       setSendToDriveProgressLabel(null);
     }
