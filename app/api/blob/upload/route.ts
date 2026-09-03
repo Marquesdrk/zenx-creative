@@ -11,7 +11,8 @@ export async function POST(request: Request) {
       body,
       request,
       onBeforeGenerateToken: async (pathname) => {
-        if (!pathname.startsWith("editor-batches/") && !pathname.startsWith("editor-assets/")) {
+        const allowedPrefixes = ["editor-batches/", "editor-assets/", "scheduled-posts/"];
+        if (!allowedPrefixes.some((prefix) => pathname.startsWith(prefix))) {
           throw new Error("Destino de upload inválido.");
         }
 

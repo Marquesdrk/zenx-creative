@@ -1,5 +1,6 @@
 "use client";
 
+import { upload } from "@vercel/blob/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, HardDrive, Send, Upload } from "lucide-react";
 import type { PublicSocialAccount } from "@/lib/server/meta/types";
@@ -81,10 +82,27 @@ export function ScheduledPostComposer({
     let payload: Record<string, unknown>;
 
     if (useDrive && driveAvailable) {
-      const formData = new FormData();
-      formData.append("file", videoFile);
-      formData.append("socialAccountId", selectedIds[0]);
-      const uploadRes = await fetch("/api/scheduled-posts/upload-to-drive", { method: "POST", body: formData });
+      // Sobe pro Blob primeiro (direto do navegador) e manda só a URL — a function de
+      // /upload-to-drive rejeitaria com 413 qualquer vídeo real enviado direto no corpo da
+      // requisição (limite fixo de ~4.5MB da Vercel, não contornável com maxDuration/memória).
+      let blob: { url: string };
+      try {
+        blob = await upload(`scheduled-posts/${crypto.randomUUID()}-${videoFile.name}`, videoFile, {
+          access: "private",
+          handleUploadUrl: "/api/blob/upload",
+          multipart: true,
+          contentType: videoFile.type || "video/mp4",
+        });
+      } catch {
+        setSubmitting(null);
+        setError("Falha ao enviar o vídeo.");
+        return;
+      }
+      const uploadRes = await fetch("/api/scheduled-posts/upload-to-drive", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blobUrl: blob.url, filename: videoFile.name, socialAccountId: selectedIds[0] }),
+      });
       if (!uploadRes.ok) {
         const data = await uploadRes.json().catch(() => ({}));
         setSubmitting(null);
@@ -93,6 +111,13 @@ export function ScheduledPostComposer({
       }
       const data = (await uploadRes.json()) as { driveFileId: string; driveFileName: string };
       payload = { videoSource: "drive", driveFileId: data.driveFileId, driveFileName: data.driveFileName };
+      // O vídeo já está a salvo no Drive — o blob temporário só existiu pra contornar o
+      // limite de corpo de requisição, não precisa sobreviver além deste submit.
+      fetch("/api/blob/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls: [blob.url] }),
+      }).catch(() => {});
     } else {
       const formData = new FormData();
       formData.append("file", videoFile);

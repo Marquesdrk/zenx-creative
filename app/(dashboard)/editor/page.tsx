@@ -401,6 +401,7 @@ export default function EditorPage() {
     setSendToDriveProgressLabel(`Preparando 0/${batchItems.length}`);
     setSendToDriveError(null);
     let temporaryProfileBlobUrls: string[] = [];
+    const temporaryRenderedBlobUrls: string[] = [];
     try {
       const exportId = crypto.randomUUID();
       const uploadedProfileAssets = await uploadTemporaryProfileAssets(profile, batchId, exportId);
@@ -439,12 +440,23 @@ export default function EditorPage() {
           throw new Error(message);
         }
         const content = new Uint8Array(await res.arrayBuffer());
-        const renderedFile = new File([content], zipVideoFilename(item.filename), { type: "video/mp4" });
+        const renderedFilename = zipVideoFilename(item.filename);
 
-        const formData = new FormData();
-        formData.append("file", renderedFile);
-        formData.append("socialAccountId", socialAccountId);
-        const driveRes = await fetch("/api/scheduled-posts/upload-to-drive", { method: "POST", body: formData });
+        // Vídeo renderizado sobe pro Blob primeiro (direto do navegador, sem passar pela
+        // function) — mandar os bytes direto no corpo de /upload-to-drive estoura o limite
+        // fixo de ~4.5MB de requisição da Vercel pra qualquer vídeo de verdade (erro 413).
+        const renderedBlob = await upload(
+          `editor-batches/${batchId}/${exportId}/rendered-${item.id}.mp4`,
+          new File([content], renderedFilename, { type: "video/mp4" }),
+          { access: "private", handleUploadUrl: "/api/blob/upload", multipart: true, contentType: "video/mp4" }
+        );
+        temporaryRenderedBlobUrls.push(renderedBlob.url);
+
+        const driveRes = await fetch("/api/scheduled-posts/upload-to-drive", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ blobUrl: renderedBlob.url, filename: renderedFilename, socialAccountId }),
+        });
         if (!driveRes.ok) {
           const data = await driveRes.json().catch(() => ({}) as { error?: string });
           throw new Error(data.error || `Falha ao enviar "${item.filename}" para o Google Drive.`);
@@ -460,7 +472,7 @@ export default function EditorPage() {
     } catch (error) {
       setSendToDriveError(error instanceof Error ? error.message : "Falha ao enviar o lote para o Google Drive.");
     } finally {
-      await deleteTemporaryBlobs(temporaryProfileBlobUrls);
+      await deleteTemporaryBlobs([...temporaryProfileBlobUrls, ...temporaryRenderedBlobUrls]);
       setSendingToDriveBatchId(null);
       setSendToDriveProgressLabel(null);
     }
