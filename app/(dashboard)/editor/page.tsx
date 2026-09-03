@@ -257,7 +257,7 @@ export default function EditorPage() {
         status: "AWAITING_REVIEW",
         sourceAnalysis: analysis,
         manualOverrides: analysis
-          ? { ...item.manualOverrides, sourceTrim: analysis.suggestedSourceTrim }
+          ? { ...item.manualOverrides, crop: analysis.suggestedCrop }
           : item.manualOverrides,
       };
       setItems((current) => current.map((i) => (i.id === item.id ? { ...i, ...patch } : i)));

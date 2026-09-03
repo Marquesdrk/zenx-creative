@@ -1,21 +1,13 @@
-import { NEUTRAL_SOURCE_TRIM, type CropBox, type SourceAnalysis, type SourceTrim } from "./types";
+import { FULL_FRAME_CROP, type Crop, type SourceAnalysis } from "./types";
 
 const MAX_BORDER_SCAN_RATIO = 0.22;
 const SAMPLE_STEP = 8;
 const DARK_LUMA_THRESHOLD = 20;
 
-const MAX_SUGGESTED_ZOOM = 2;
-
 const NEUTRAL_ANALYSIS: Omit<SourceAnalysis, "width" | "height" | "aspectRatio"> = {
   hasLetterboxing: false,
-  suggestedCropBox: { x: 0.5, y: 0.5 },
-  suggestedZoom: 1,
-  suggestedSourceTrim: { ...NEUTRAL_SOURCE_TRIM },
+  suggestedCrop: { ...FULL_FRAME_CROP },
 };
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
 
 function luminance(r: number, g: number, b: number) {
   return 0.299 * r + 0.587 * g + 0.114 * b;
@@ -74,41 +66,26 @@ function detectBorders(data: Uint8ClampedArray, width: number, height: number) {
 }
 
 /** Analisa um frame já desenhado no canvas: detecta barras pretas/bordas uniformes e sugere
- *  um recorte que prioriza remover essas áreas, centralizando o conteúdo restante — nunca
- *  estica, só recorta.
- *
- *  Detectar a posição sozinha não bastava: se a origem já tem a mesma proporção do quadro
- *  alvo (comum em vídeo vertical), o recorte a zoom 1x cobre o frame inteiro e mover a
- *  posição não tem nenhum efeito visível — não sobra espaço pra deslocar. O zoom sugerido
- *  aqui aperta a janela de recorte o suficiente pra excluir as barras detectadas, o que
- *  também é o que dá "folga" real pra reposicionar depois. */
+ *  um recorte que exclui exatamente essas faixas — nunca força proporção, nunca perde
+ *  conteúdo real. O usuário pode refinar visualmente esse recorte depois de aplicado. */
 export function analyzeFrame(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number
-): { hasLetterboxing: boolean; suggestedCropBox: CropBox; suggestedZoom: number; suggestedSourceTrim: SourceTrim } {
+): { hasLetterboxing: boolean; suggestedCrop: Crop } {
   const { top, bottom, left, right } = detectBorders(
     ctx.getImageData(0, 0, width, height).data,
     width,
     height
   );
   const hasLetterboxing = top + bottom + left + right > 0;
-  const contentWidth = Math.max(1, width - left - right);
-  const contentHeight = Math.max(1, height - top - bottom);
-  const centerX = (left + contentWidth / 2) / width;
-  const centerY = (top + contentHeight / 2) / height;
-  const zoomForWidth = width / contentWidth;
-  const zoomForHeight = height / contentHeight;
-  const suggestedZoom = clamp(Math.max(zoomForWidth, zoomForHeight), 1, MAX_SUGGESTED_ZOOM);
   return {
     hasLetterboxing,
-    suggestedCropBox: { x: clamp(centerX, 0, 1), y: clamp(centerY, 0, 1) },
-    suggestedZoom,
-    suggestedSourceTrim: {
-      top: top / height,
-      bottom: bottom / height,
-      left: left / width,
-      right: right / width,
+    suggestedCrop: {
+      x: left / width,
+      y: top / height,
+      width: Math.max(0.05, (width - left - right) / width),
+      height: Math.max(0.05, (height - top - bottom) / height),
     },
   };
 }
@@ -151,12 +128,8 @@ export function analyzeVideoSource(url: string): Promise<SourceAnalysis> {
         }
         try {
           ctx.drawImage(video, 0, 0, width, height);
-          const { hasLetterboxing, suggestedCropBox, suggestedZoom, suggestedSourceTrim } = analyzeFrame(
-            ctx,
-            width,
-            height
-          );
-          finish({ ...base, hasLetterboxing, suggestedCropBox, suggestedZoom, suggestedSourceTrim });
+          const { hasLetterboxing, suggestedCrop } = analyzeFrame(ctx, width, height);
+          finish({ ...base, hasLetterboxing, suggestedCrop });
         } catch {
           finish({ ...base, ...NEUTRAL_ANALYSIS });
         }

@@ -69,11 +69,10 @@ function BatchPreview({ item, profile }: { item: BatchItem | null; profile: Prof
           title={item.manualOverrides.title}
           caption={item.manualOverrides.caption}
           contentUrl={item.renderedUrl ?? item.contentUrl}
-          contentCropBox={item.manualOverrides.cropBox}
-          contentCropZoom={item.manualOverrides.cropZoom}
+          contentCrop={item.manualOverrides.crop}
+          contentZoom={item.manualOverrides.zoom}
           contentFit={item.manualOverrides.fit}
           contentRotation={item.manualOverrides.rotation}
-          contentSourceTrim={item.manualOverrides.sourceTrim}
           watermarkPosition={item.manualOverrides.watermarkPosition}
           xStyleVideoFrame={item.manualOverrides.xStyleVideoFrame}
           reactionMediaUrl={

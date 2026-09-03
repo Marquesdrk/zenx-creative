@@ -7,9 +7,9 @@ import { get } from "@vercel/blob";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { applySourceTrim, computeCropRect, effectiveDimensions } from "@/lib/editor/crop-geometry";
+import { effectiveDimensions, fitCenteredRect, normalizedCropToPixels } from "@/lib/editor/crop-geometry";
 import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
-import { resolveXStyleLayout, type BatchItem, type CropBox, type Profile } from "@/lib/editor/types";
+import { resolveXStyleLayout, type BatchItem, type Profile } from "@/lib/editor/types";
 import { emojiAssetCode, isEmojiSegment, splitGraphemes, whatsappEmojiFilename } from "@/lib/emoji/whatsapp";
 import { generatedFileUrl, generatedFolder, publicUrlToPath, sanitizeFilename } from "@/lib/server/public-files";
 
@@ -108,20 +108,6 @@ function xStyleBackgroundCandidates(profile: Profile) {
   return candidates;
 }
 
-/** Recorte "cover": mesmo cálculo usado pelo editor visual (components/editor/crop-editor.tsx)
- *  via lib/editor/crop-geometry.ts — prévia e vídeo final nunca divergem. */
-function buildCropFilter(
-  effWidth: number,
-  effHeight: number,
-  cropBox: CropBox,
-  zoom: number,
-  targetWidth: number,
-  targetHeight: number
-): string {
-  const rect = computeCropRect(effWidth, effHeight, cropBox, zoom, targetWidth / targetHeight);
-  return `crop=${Math.round(rect.width)}:${Math.round(rect.height)}:${Math.round(rect.x)}:${Math.round(rect.y)}`;
-}
-
 /** Consulta a resolução real do arquivo via ffprobe — nunca confia só na análise feita no
  *  navegador (que pode falhar silenciosamente para formatos que o <video> do browser não
  *  decodifica, mesmo que o ffmpeg consiga processar normalmente). Usar a dimensão errada
@@ -143,43 +129,36 @@ function probeDimensions(filePath: string): Promise<{ width: number; height: num
   });
 }
 
-/** Filtros universais aplicados ao vídeo de conteúdo de qualquer engine: rotação seguida de
- *  recorte+zoom ("Preencher") ou escala+barras ("Ajustar"), sempre terminando em targetW x
- *  targetH. */
+/** Filtros universais aplicados ao vídeo de conteúdo de qualquer engine: rotação, recorte
+ *  explícito do usuário (editor visual de recorte), e por fim o encaixe no quadro alvo —
+ *  "Preencher" aperta o centro do recorte pelo zoom até preencher sem barras, "Ajustar" só
+ *  escala e completa com barras, nunca cortando além do que já foi definido em `crop`.
+ *  Sempre termina em targetW x targetH. */
 function buildContentFilters(
   item: BatchItem,
   source: { width: number; height: number },
   targetWidth: number,
   targetHeight: number
 ): string[] {
-  const { rotation, fit, cropBox, cropZoom, sourceTrim } = item.manualOverrides;
-  const trim = sourceTrim ?? { top: 0, bottom: 0, left: 0, right: 0 };
-  const filters: string[] = [];
+  const { rotation, fit, crop, zoom } = item.manualOverrides;
+  const filters = [...(ROTATE_FILTERS[rotation] ?? [])];
+  const { width: effWidth, height: effHeight } = effectiveDimensions(source.width, source.height, rotation);
 
-  // Aparar barras gravadas no arquivo original acontece antes de qualquer rotação/recorte —
-  // opera sempre sobre as dimensões cruas da fonte, nunca sobre as já rotacionadas/recortadas.
-  let sourceWidth = source.width;
-  let sourceHeight = source.height;
-  if (trim.top > 0 || trim.bottom > 0 || trim.left > 0 || trim.right > 0) {
-    const trimRect = applySourceTrim(source.width, source.height, trim);
-    filters.push(`crop=${trimRect.width}:${trimRect.height}:${trimRect.x}:${trimRect.y}`);
-    sourceWidth = trimRect.width;
-    sourceHeight = trimRect.height;
-  }
-
-  filters.push(...(ROTATE_FILTERS[rotation] ?? []));
-  const { width: effWidth, height: effHeight } = effectiveDimensions(sourceWidth, sourceHeight, rotation);
+  // Recorte explícito do usuário — única fonte da região usada, igual ao editor visual e à
+  // prévia (lib/editor/crop-geometry.ts normalizedCropToPixels).
+  const userCrop = normalizedCropToPixels(crop, effWidth, effHeight);
+  filters.push(`crop=${userCrop.width}:${userCrop.height}:${userCrop.x}:${userCrop.y}`);
 
   if (fit === "contain") {
-    // Posição do conteúdo dentro das barras (mesma lógica do object-position no preview) —
-    // (ow-iw)*0.5 é o centro; usar cropBox.x/y no lugar do 0.5 fixo dá controle real de
-    // "muito alto"/"muito baixo" em vez de sempre centralizar.
     filters.push(
       `scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=decrease:flags=fast_bilinear`,
-      `pad=${targetWidth}:${targetHeight}:(ow-iw)*${cropBox.x}:(oh-ih)*${cropBox.y}:color=black`
+      `pad=${targetWidth}:${targetHeight}:(ow-iw)*0.5:(oh-ih)*0.5:color=black`
     );
   } else {
-    filters.push(buildCropFilter(effWidth, effHeight, cropBox, cropZoom, targetWidth, targetHeight));
+    const fitted = fitCenteredRect(userCrop.width, userCrop.height, zoom, targetWidth / targetHeight);
+    filters.push(
+      `crop=${Math.round(fitted.width)}:${Math.round(fitted.height)}:${Math.round(fitted.x)}:${Math.round(fitted.y)}`
+    );
     filters.push(`scale=${targetWidth}:${targetHeight}:flags=fast_bilinear`);
   }
   filters.push("fps=30");

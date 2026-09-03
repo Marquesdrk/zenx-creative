@@ -10,16 +10,32 @@ export type ReactionMedia = {
 
 /** Posições sempre relativas (0 a 1), nunca em pixels. */
 export type WatermarkPosition = { x: number; y: number; scale: number; opacity: number };
-export type CropBox = { x: number; y: number };
 /** Como o vídeo importado preenche o quadro do template. */
 export type FitMode = "cover" | "contain";
 export type Rotation = 0 | 90 | 180 | 270;
-/** Fração (0 a ~0.4) aparada de cada borda do vídeo original, antes de qualquer recorte/zoom/
- *  preenchimento — remove barras pretas gravadas no arquivo sem forçar proporção nem cortar
- *  conteúdo real, ao contrário de cropBox/cropZoom (que sempre travam na proporção alvo). */
-export type SourceTrim = { top: number; bottom: number; left: number; right: number };
 
-export const NEUTRAL_SOURCE_TRIM: SourceTrim = { top: 0, bottom: 0, left: 0, right: 0 };
+/** Retângulo de recorte livre, normalizado (0 a 1) relativo às dimensões efetivas da origem
+ *  (já após rotação) — x/y é o canto superior esquerdo, não o centro. É a única fonte de
+ *  verdade de "qual região do vídeo usar": nunca força proporção nem depende do tamanho do
+ *  preview na tela. Ex.: {x:0.15, y:0.10, width:0.70, height:0.60} usa 70% da largura e 60%
+ *  da altura, começando a 15% da esquerda e 10% do topo. */
+export type Crop = { x: number; y: number; width: number; height: number };
+
+/** Recorte neutro = vídeo inteiro, sem nenhum corte ainda aplicado. */
+export const FULL_FRAME_CROP: Crop = { x: 0, y: 0, width: 1, height: 1 };
+
+/** Trava de proporção do editor visual de recorte — "template" (recomendado no fluxo padrão)
+ *  amarra o recorte à proporção do quadro reservado pro vídeo dentro do template ativo. */
+export type AspectMode = "free" | "original" | "9:16" | "1:1" | "4:5" | "template";
+
+export const ASPECT_MODE_LABELS: Record<AspectMode, string> = {
+  free: "Livre",
+  original: "Original",
+  "9:16": "9:16",
+  "1:1": "1:1",
+  "4:5": "4:5",
+  template: "Template",
+};
 
 export type ReactProfile = {
   id: string;
@@ -148,14 +164,17 @@ export type ManualOverrides = {
   /** Ajuste manual da janela de vídeo dentro do template X Style. Ausente = layout do perfil. */
   xStyleVideoFrame?: XStyleVideoFrame | null;
   watermarkPosition: WatermarkPosition;
-  cropBox: CropBox;
-  /** Zoom aplicado sobre o recorte (1 = sem zoom), permitindo um "recorte livre" combinando
-   *  posição (cropBox) e escala. */
-  cropZoom: number;
-  /** Corte independente por borda (topo/base/esquerda/direita) do vídeo original — pensado
-   *  para remover barras pretas gravadas no arquivo em qualquer modo de preenchimento, sem
-   *  o travamento de proporção que cropBox/cropZoom têm. */
-  sourceTrim: SourceTrim;
+  /** Região do vídeo original a usar — manipulada pelo editor visual de recorte (arrastar/
+   *  redimensionar a moldura), nunca por sliders. Já contempla remoção de barras pretas
+   *  (a detecção automática só recalcula este valor). */
+  crop: Crop;
+  /** Trava de proporção usada pelo editor visual ao redimensionar a moldura — não afeta o
+   *  render diretamente, só a interação (o crop resultante é sempre livre internamente). */
+  aspectMode: AspectMode;
+  /** Zoom aplicado sobre o conteúdo dentro do recorte (1 = sem zoom) — amplia o que já foi
+   *  selecionado por `crop`, nunca substitui a seleção de região. Sem efeito em fit="contain"
+   *  (que por definição nunca corta nada além do já definido em `crop`). */
+  zoom: number;
   fit: FitMode;
   rotation: Rotation;
   /** Corte de entrada/saída, em segundos, sobre o vídeo original. trimEnd null = até o fim. */
@@ -175,9 +194,9 @@ export function createDefaultManualOverrides(
   return {
     ...params,
     title: params.title ?? "",
-    cropBox: { x: 0.5, y: 0.5 },
-    cropZoom: 1,
-    sourceTrim: { ...NEUTRAL_SOURCE_TRIM },
+    crop: { ...FULL_FRAME_CROP },
+    aspectMode: "template",
+    zoom: 1,
     fit: "cover",
     rotation: 0,
     trimStart: 0,
@@ -190,21 +209,16 @@ export function createDefaultManualOverrides(
 /** Resultado da normalização da origem (fase 3): resolução/aspect ratio reais do arquivo,
  *  detecção heurística de barras pretas/bordas uniformes (sem ML/detecção de rosto — isso
  *  fica para uma fase com um serviço de análise dedicado) e o recorte sugerido a partir
- *  disso. Guardado separado de `manualOverrides.cropBox`, que é o que o usuário efetivamente
- *  aplicou (começa igual ao sugerido, mas o usuário pode ajustar). */
+ *  disso. Guardado separado de `manualOverrides.crop`, que é o que o usuário efetivamente
+ *  aplicou (começa igual ao sugerido, mas o usuário pode ajustar visualmente). */
 export type SourceAnalysis = {
   width: number;
   height: number;
   aspectRatio: number;
   hasLetterboxing: boolean;
-  suggestedCropBox: CropBox;
-  /** Zoom sugerido pra excluir as barras detectadas do recorte — sem isso, reposicionar não
-   *  teria efeito quando a origem já preenche o quadro alvo por completo (zoom 1x = sem
-   *  folga pra mover). */
-  suggestedZoom: number;
-  /** Corte por borda sugerido a partir das mesmas barras detectadas — usado como o ajuste
-   *  automático padrão, por remover as barras sem forçar proporção nem perder conteúdo. */
-  suggestedSourceTrim: SourceTrim;
+  /** Recorte sugerido a partir das mesmas barras detectadas — exclui exatamente as faixas
+   *  pretas, sem forçar proporção nem perder conteúdo real. */
+  suggestedCrop: Crop;
 };
 
 export type BatchItem = {

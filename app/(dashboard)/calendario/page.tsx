@@ -279,7 +279,7 @@ export default function CalendarioPage() {
                 nextPosts.map((event) => (
                   <div key={event.publication.id} className="flex items-center gap-3 rounded-lg border border-border bg-[#101014] p-3">
                     <div className="w-14">
-                      <VideoFrame profile={event.profile} title={event.item.manualOverrides.title} caption={event.item.manualOverrides.caption} contentUrl={event.item.renderedUrl ?? event.item.contentUrl} contentCropBox={event.item.manualOverrides.cropBox} contentCropZoom={event.item.manualOverrides.cropZoom} contentFit={event.item.manualOverrides.fit} contentRotation={event.item.manualOverrides.rotation} watermarkPosition={event.item.manualOverrides.watermarkPosition} xStyleVideoFrame={event.item.manualOverrides.xStyleVideoFrame} />
+                      <VideoFrame profile={event.profile} title={event.item.manualOverrides.title} caption={event.item.manualOverrides.caption} contentUrl={event.item.renderedUrl ?? event.item.contentUrl} contentCrop={event.item.manualOverrides.crop} contentZoom={event.item.manualOverrides.zoom} contentFit={event.item.manualOverrides.fit} contentRotation={event.item.manualOverrides.rotation} watermarkPosition={event.item.manualOverrides.watermarkPosition} xStyleVideoFrame={event.item.manualOverrides.xStyleVideoFrame} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 text-xs text-muted">

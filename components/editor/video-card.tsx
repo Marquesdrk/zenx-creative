@@ -37,8 +37,8 @@ export function VideoCard({
             title={item.manualOverrides.title}
             caption={item.manualOverrides.caption}
             contentUrl={item.contentUrl}
-            contentCropBox={item.manualOverrides.cropBox}
-            contentCropZoom={item.manualOverrides.cropZoom}
+            contentCrop={item.manualOverrides.crop}
+            contentZoom={item.manualOverrides.zoom}
             contentFit={item.manualOverrides.fit}
             contentRotation={item.manualOverrides.rotation}
             watermarkPosition={item.manualOverrides.watermarkPosition}

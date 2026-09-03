@@ -1,18 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
-import { contentTargetAspect } from "@/lib/editor/crop-geometry";
+import { ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
+import { clamp, contentTargetAspect } from "@/lib/editor/crop-geometry";
 import { analyzeVideoSource } from "@/lib/editor/source-analysis";
-import { CropEditor } from "./crop-editor";
+import { CropBoxEditor } from "./crop-box-editor";
 import { VideoFrame } from "./video-frame";
 import { WatermarkCanvas } from "./watermark-canvas";
 import {
+  ASPECT_MODE_LABELS,
+  FULL_FRAME_CROP,
   resolveXStyleLayout,
+  type AspectMode,
   type BatchItem,
+  type Crop,
   type Profile,
   type Rotation,
-  type SourceTrim,
   type XStyleVideoFrame,
 } from "@/lib/editor/types";
 
@@ -20,13 +23,12 @@ const ROTATIONS: Rotation[] = [0, 90, 180, 270];
 const OUTPUT_WIDTH = 1080;
 const OUTPUT_HEIGHT = 1920;
 const MIN_X_STYLE_FRAME_SIZE = 80;
-const MAX_TRIM_PER_EDGE = 0.4;
-
-const TRIM_EDGES: { key: keyof SourceTrim; label: string }[] = [
-  { key: "top", label: "Topo" },
-  { key: "bottom", label: "Base" },
-  { key: "left", label: "Esquerda" },
-  { key: "right", label: "Direita" },
+const ASPECT_MODES: AspectMode[] = ["free", "original", "9:16", "1:1", "4:5", "template"];
+const CROP_FIELDS: { key: keyof Crop; label: string }[] = [
+  { key: "x", label: "X" },
+  { key: "y", label: "Y" },
+  { key: "width", label: "Largura" },
+  { key: "height", label: "Altura" },
 ];
 
 function formatTime(seconds: number) {
@@ -62,6 +64,7 @@ export function EditDrawer({
   const [applyToAll, setApplyToAll] = useState(false);
   const [duration, setDuration] = useState(0);
   const [redetecting, setRedetecting] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const trimVideoRef = useRef<HTMLVideoElement>(null);
   const overrides = draft.manualOverrides;
 
@@ -87,11 +90,14 @@ export function EditDrawer({
     }));
   }
 
-  function updateSourceTrim(edge: keyof SourceTrim, value: number) {
-    const current = overrides.sourceTrim;
-    const opposite = edge === "top" ? current.bottom : edge === "bottom" ? current.top : edge === "left" ? current.right : current.left;
-    const clamped = Math.min(value, Math.max(0, 1 - opposite - 0.1));
-    updateOverrides({ sourceTrim: { ...current, [edge]: clamped } });
+  function updateCropField(key: keyof Crop, percent: number) {
+    const value = clamp(percent / 100, 0, 1);
+    const next = { ...overrides.crop, [key]: value };
+    if (key === "x") next.width = Math.min(next.width, 1 - value);
+    if (key === "y") next.height = Math.min(next.height, 1 - value);
+    if (key === "width") next.width = Math.min(value, 1 - next.x);
+    if (key === "height") next.height = Math.min(value, 1 - next.y);
+    updateOverrides({ crop: next });
   }
 
   const defaultXStyleVideoFrame =
@@ -120,7 +126,7 @@ export function EditDrawer({
       sourceAnalysis: analysis,
       manualOverrides: {
         ...current.manualOverrides,
-        sourceTrim: analysis.suggestedSourceTrim,
+        crop: analysis.suggestedCrop,
       },
     }));
     setRedetecting(false);
@@ -195,14 +201,12 @@ export function EditDrawer({
                     title={overrides.title}
                     caption={overrides.caption}
                     contentUrl={draft.contentUrl}
-                    contentCropBox={overrides.cropBox}
-                    contentCropZoom={overrides.cropZoom}
+                    contentCrop={overrides.crop}
+                    contentZoom={overrides.zoom}
                     contentFit={overrides.fit}
                     contentRotation={overrides.rotation}
-                    contentSourceTrim={overrides.sourceTrim}
                     playing
                     xStyleVideoFrame={overrides.xStyleVideoFrame}
-                    onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
                   />
                 </div>
               </div>
@@ -213,12 +217,10 @@ export function EditDrawer({
                     profile={profile}
                     caption={overrides.caption}
                     contentUrl={draft.contentUrl}
-                    contentCropBox={overrides.cropBox}
-                    contentCropZoom={overrides.cropZoom}
+                    contentCrop={overrides.crop}
+                    contentZoom={overrides.zoom}
                     contentFit={overrides.fit}
                     contentRotation={overrides.rotation}
-                    contentSourceTrim={overrides.sourceTrim}
-                    onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
                     watermarkPosition={overrides.watermarkPosition}
                     onWatermarkPositionChange={(watermarkPosition) => updateOverrides({ watermarkPosition })}
                   />
@@ -228,14 +230,12 @@ export function EditDrawer({
                     title={overrides.title}
                     caption={overrides.caption}
                     contentUrl={draft.contentUrl}
-                    contentCropBox={overrides.cropBox}
-                    contentCropZoom={overrides.cropZoom}
+                    contentCrop={overrides.crop}
+                    contentZoom={overrides.zoom}
                     contentFit={overrides.fit}
                     contentRotation={overrides.rotation}
-                    contentSourceTrim={overrides.sourceTrim}
                     playing
                     xStyleVideoFrame={overrides.xStyleVideoFrame}
-                    onContentPositionChange={(cropBox) => updateOverrides({ cropBox })}
                     reactionMediaUrl={
                       profile.engine === "REACT"
                         ? (profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.url ??
@@ -442,65 +442,102 @@ export function EditDrawer({
 
               <div>
                 <div className="mb-2 flex items-center justify-between">
-                  <SectionLabel>Remover bordas do vídeo original</SectionLabel>
-                  {draft.sourceAnalysis?.hasLetterboxing && (
-                    <button
-                      type="button"
-                      onClick={() => updateOverrides({ sourceTrim: draft.sourceAnalysis!.suggestedSourceTrim })}
-                      className="text-[11px] font-semibold text-accent"
-                    >
-                      Usar detecção automática
-                    </button>
-                  )}
-                </div>
-                <p className="mb-2 -mt-1 text-[11px] text-muted">
-                  Apara faixas pretas gravadas no arquivo (topo, base, laterais) antes de qualquer
-                  recorte — funciona em Preencher e em Ajustar, sem cortar conteúdo real.
-                </p>
-                <div className="grid grid-cols-2 gap-3">
-                  {TRIM_EDGES.map(({ key, label }) => (
-                    <label key={key} className="rounded-lg border border-border bg-card p-2.5">
-                      <span className="mb-1.5 flex items-center justify-between text-[11px] font-semibold text-muted">
-                        {label}
-                        <span className="tabular-nums text-gray-400">
-                          {Math.round(overrides.sourceTrim[key] * 100)}%
-                        </span>
-                      </span>
-                      <input
-                        aria-label={`Aparar ${label.toLowerCase()}`}
-                        type="range"
-                        min={0}
-                        max={MAX_TRIM_PER_EDGE}
-                        step={0.01}
-                        value={overrides.sourceTrim[key]}
-                        onChange={(event) => updateSourceTrim(key, Number(event.target.value))}
-                        className="w-full accent-accent"
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <div className="mb-2 flex items-center justify-between">
                   <SectionLabel>Recorte do conteúdo</SectionLabel>
-                  <span className="text-[11px] tabular-nums text-gray-400">
-                    {overrides.cropZoom.toFixed(1)}×
-                  </span>
+                  <span className="text-[11px] tabular-nums text-gray-400">{overrides.zoom.toFixed(1)}×</span>
                 </div>
                 <p className="mb-2 -mt-1 text-[11px] text-muted">
-                  Arraste o quadro pra reposicionar, puxe o canto pra recortar mais ou menos.
+                  Arraste para reposicionar. Use as bordas para ajustar.
                 </p>
-                <CropEditor
+                <CropBoxEditor
                   contentUrl={draft.contentUrl}
                   sourceWidth={draft.sourceAnalysis?.width || OUTPUT_WIDTH}
                   sourceHeight={draft.sourceAnalysis?.height || OUTPUT_HEIGHT}
                   rotation={overrides.rotation}
+                  crop={overrides.crop}
+                  aspectMode={overrides.aspectMode}
                   targetAspect={contentTargetAspect(profile.engine, xStyleVideoFrame)}
-                  cropBox={overrides.cropBox}
-                  cropZoom={overrides.cropZoom}
-                  onChange={({ cropBox, zoom }) => updateOverrides({ cropBox, cropZoom: zoom })}
+                  onChange={(crop) => updateOverrides({ crop })}
                 />
+
+                <div className="mt-3">
+                  <label htmlFor="crop-zoom" className="mb-1 flex items-center justify-between text-[11px] text-muted">
+                    Zoom
+                  </label>
+                  <input
+                    id="crop-zoom"
+                    type="range"
+                    min={1}
+                    max={3}
+                    step={0.1}
+                    value={overrides.zoom}
+                    onChange={(event) => updateOverrides({ zoom: Number(event.target.value) })}
+                    className="w-full accent-accent"
+                  />
+                </div>
+
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <label className="flex-1 text-[11px] text-muted">
+                    Proporção:
+                    <select
+                      aria-label="Proporção do recorte"
+                      value={overrides.aspectMode}
+                      onChange={(event) => updateOverrides({ aspectMode: event.target.value as AspectMode })}
+                      className="ml-2 h-8 rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                    >
+                      {ASPECT_MODES.map((mode) => (
+                        <option key={mode} value={mode}>
+                          {ASPECT_MODE_LABELS[mode]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {draft.sourceAnalysis?.hasLetterboxing && (
+                    <button
+                      type="button"
+                      onClick={() => updateOverrides({ crop: draft.sourceAnalysis!.suggestedCrop })}
+                      className="shrink-0 text-[11px] font-semibold text-accent"
+                    >
+                      Usar detecção automática
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => updateOverrides({ crop: { ...FULL_FRAME_CROP }, zoom: 1 })}
+                    className="shrink-0 rounded-lg border border-border bg-card px-3 py-1.5 text-[11px] font-semibold text-gray-300 hover:bg-card-hover"
+                  >
+                    Redefinir
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen((current) => !current)}
+                  className="mt-3 flex items-center gap-1 text-[11px] font-semibold text-muted hover:text-foreground"
+                >
+                  <ChevronDown size={12} className={advancedOpen ? "rotate-180" : ""} />
+                  Ajustes avançados
+                </button>
+                {advancedOpen && (
+                  <div className="mt-2 grid grid-cols-4 gap-2">
+                    {CROP_FIELDS.map(({ key, label }) => (
+                      <label key={key} className="rounded-lg border border-border bg-card p-2">
+                        <span className="mb-1 block text-[10px] text-muted">{label}</span>
+                        <span className="flex items-center gap-0.5">
+                          <input
+                            aria-label={label}
+                            type="number"
+                            min={0}
+                            max={100}
+                            value={Math.round(overrides.crop[key] * 100)}
+                            onChange={(event) => updateCropField(key, Number(event.target.value))}
+                            className="h-7 w-full min-w-0 rounded-md border border-border bg-[#111] px-1.5 text-right text-xs tabular-nums text-gray-200 outline-none focus:border-accent"
+                          />
+                          <span className="text-[10px] text-gray-400">%</span>
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-4">
