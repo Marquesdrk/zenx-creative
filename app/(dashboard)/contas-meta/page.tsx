@@ -2,7 +2,7 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, CheckCircle2, Filter, MoreVertical, Plus, Stethoscope, Unlink, Users } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Filter, FolderPlus, MoreVertical, Plus, Stethoscope, Unlink, Users } from "lucide-react";
 import { ConnectionDiagnosticsModal } from "@/components/meta/connection-diagnostics-modal";
 import { DiscoveryPicker } from "@/components/meta/discovery-picker";
 import { Topbar } from "@/components/shell/topbar";
@@ -109,6 +109,7 @@ function ContasMetaContent() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [diagnosticsAccountId, setDiagnosticsAccountId] = useState<string | null>(null);
+  const [driveFolderMessage, setDriveFolderMessage] = useState<string | null>(null);
 
   const sessionId = searchParams.get("meta_session");
   const metaError = searchParams.get("meta_error");
@@ -131,6 +132,15 @@ function ContasMetaContent() {
     const res = await fetch(`/api/meta/accounts/${id}`, { method: "DELETE" });
     setBusyId(null);
     if (res.ok) await refresh();
+  }
+
+  async function handleEnsureDriveFolder(id: string) {
+    setBusyId(id);
+    setDriveFolderMessage(null);
+    const res = await fetch(`/api/meta/accounts/${id}/ensure-drive-folder`, { method: "POST" });
+    const data = await res.json().catch(() => ({}) as { error?: string; folder?: string });
+    setBusyId(null);
+    setDriveFolderMessage(res.ok ? `Pasta pronta: ${data.folder}` : data.error || "Falha ao criar a pasta no Drive.");
   }
 
   function dismissError() {
@@ -181,6 +191,12 @@ function ContasMetaContent() {
         <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-accent/30 bg-accent/10 p-3 text-sm text-[#B8B0FF]">
           <span>{metaNotice}</span>
           <button type="button" onClick={dismissError} className="shrink-0 font-semibold underline">fechar</button>
+        </div>
+      )}
+      {driveFolderMessage && (
+        <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-accent/30 bg-accent/10 p-3 text-sm text-[#B8B0FF]">
+          <span>{driveFolderMessage}</span>
+          <button type="button" onClick={() => setDriveFolderMessage(null)} className="shrink-0 font-semibold underline">fechar</button>
         </div>
       )}
 
@@ -249,6 +265,18 @@ function ContasMetaContent() {
                     >
                       Gerenciar
                     </a>
+                    {brand.instagram && (
+                      <button
+                        type="button"
+                        onClick={() => handleEnsureDriveFolder(brand.instagram!.id)}
+                        disabled={busyId === brand.instagram.id}
+                        aria-label={`Criar pasta no Drive para ${brand.name}`}
+                        title="Criar pasta de agendados no Google Drive"
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-card-hover hover:text-foreground disabled:opacity-40"
+                      >
+                        <FolderPlus size={14} />
+                      </button>
+                    )}
                     {(brand.instagram || brand.facebook) && (
                       <button
                         type="button"

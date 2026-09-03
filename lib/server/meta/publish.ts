@@ -1,3 +1,4 @@
+import { deleteDriveFile } from "@/lib/server/google-drive";
 import { publicationLogsRepo, scheduledPostAccountsRepo, scheduledPostsRepo, socialAccountsRepo } from "@/lib/server/meta/db";
 import { publishFacebookReel } from "./facebook";
 import { MetaGraphError, MetaNetworkError } from "./graph-client";
@@ -147,6 +148,14 @@ export async function processScheduledPostAccount(scheduledPostAccountId: string
   }
 
   await scheduledPostsRepo.syncStatusFromAccounts(post.id);
+
+  // Só remove o vídeo da pasta de agendados quando TODOS os destinos desse post já
+  // publicaram com sucesso — se algum destino ainda falhou/está pendente, mantém o arquivo
+  // pra não perder a chance de reagendar/retry manualmente.
+  const updatedPost = await scheduledPostsRepo.get(post.id);
+  if (updatedPost?.status === "published" && updatedPost.videoSource === "drive" && updatedPost.driveFileId) {
+    await deleteDriveFile(updatedPost.driveFileId);
+  }
 }
 
 async function finishFailed(

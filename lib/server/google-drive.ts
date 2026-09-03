@@ -180,6 +180,29 @@ export function scheduledVideosFolderSegments(instagramUsername: string): string
   return [ROOT_FOLDER_NAME, `@${instagramUsername.replace(/^@/, "")}`];
 }
 
+/** Garante que a pasta de agendados de uma conta já exista, sem subir nenhum arquivo — chamada
+ *  assim que a conta é conectada (e disponível como ação manual pra contas já conectadas antes
+ *  dessa checagem existir), pra o usuário já ter onde jogar vídeos manualmente sem precisar
+ *  esperar o primeiro envio pelo próprio app criar a pasta sozinha. Nunca lança se o Drive não
+ *  estiver conectado — só não faz nada (a conexão Meta não deve depender do Drive). */
+export async function ensureScheduledVideosFolder(instagramUsername: string): Promise<void> {
+  const client = await getOAuthClient();
+  if (!client) return;
+  const drive = google.drive({ version: "v3", auth: client });
+  await ensureNestedFolder(drive, scheduledVideosFolderSegments(instagramUsername));
+}
+
+/** Remove um vídeo do Drive depois que a publicação for concluída com sucesso em todos os
+ *  destinos — mantém a pasta de agendados refletindo só o que ainda falta postar, já que o
+ *  fluxo manual (exportar local + arrastar pro Drive) usa essa pasta como fila visual. Nunca
+ *  lança: falha ao apagar não deve derrubar o processamento da publicação. */
+export async function deleteDriveFile(fileId: string): Promise<void> {
+  const client = await getOAuthClient();
+  if (!client) return;
+  const drive = google.drive({ version: "v3", auth: client });
+  await drive.files.delete({ fileId }).catch(() => {});
+}
+
 /** Sobe um arquivo qualquer para uma cadeia de pastas do Drive (criando-a se preciso) e
  *  devolve o fileId — usado tanto pelos vídeos agendados quanto pelos documentos/imagens do
  *  Criador de Avatar (lib/server/avatar-pipeline.ts). Nunca duplica o arquivo em outro storage. */

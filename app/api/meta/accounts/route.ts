@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { ensureScheduledVideosFolder } from "@/lib/server/google-drive";
 import { metaOAuthSessionRepo, publicationLogsRepo, socialAccountsRepo } from "@/lib/server/meta/db";
 import { logMetaStep } from "@/lib/server/meta/log";
 import type { DiscoveredRawPage } from "@/lib/server/meta/pages";
@@ -97,6 +98,11 @@ export async function POST(request: Request) {
         metadata: { linkedPageId: page.pageId, linkedPageName: page.name },
       });
       connectedIds.push(account.id);
+      if (account.username) {
+        // Melhor esforço — a conta social conecta normalmente mesmo se o Drive não estiver
+        // configurado/conectado ainda; a pasta pode ser criada depois manualmente.
+        ensureScheduledVideosFolder(account.username).catch(() => {});
+      }
       logMetaStep("META_ACCOUNT_SAVED", { socialAccountId: account.id, metadata: { platform: "INSTAGRAM", instagramUserId: page.instagram.id } });
       await publicationLogsRepo.create({
         userId: null,
