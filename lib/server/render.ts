@@ -552,6 +552,13 @@ export async function renderBatchItem(item: BatchItem, profile: Profile): Promis
     }
     return { renderedUrl: generatedFileUrl("renders", outputFilename) };
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Falha desconhecida ao renderizar." };
+    if (err instanceof Error) {
+      // "fetch failed" sozinho esconde a causa real (DNS, TLS, conexão recusada) — Node
+      // anexa isso em `cause`, sem isso o erro não dá pra diagnosticar remotamente.
+      const cause = (err as Error & { cause?: unknown }).cause;
+      const causeMessage = cause instanceof Error ? cause.message : cause ? String(cause) : null;
+      return { error: causeMessage ? `${err.message}: ${causeMessage}` : err.message };
+    }
+    return { error: "Falha desconhecida ao renderizar." };
   }
 }

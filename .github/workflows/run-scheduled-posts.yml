@@ -1,0 +1,30 @@
+name: Run due scheduled posts
+
+# O plano Hobby da Vercel só permite Cron Jobs 1x por dia (vercel.json já tem esse como
+# rede de segurança) — sem isso, um post agendado pra "hoje às 14h" só publicaria de fato
+# até 24h depois. Este workflow chama o mesmo endpoint a cada 5 minutos, de graça, sem
+# depender do plano da Vercel. O endpoint é idempotente (cada destino é reivindicado
+# atomicamente antes de publicar), então rodar de novo em cima de um post já processado
+# nunca publica duas vezes.
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  run-due:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Chamar /api/scheduled-posts/run-due
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -n "$CRON_SECRET" ]; then
+            AUTH_HEADER="Authorization: Bearer $CRON_SECRET"
+          else
+            AUTH_HEADER="Authorization: "
+          fi
+          curl --fail --silent --show-error \
+            -X POST \
+            -H "$AUTH_HEADER" \
+            https://zenx-creative.vercel.app/api/scheduled-posts/run-due
