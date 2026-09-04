@@ -2,7 +2,7 @@
 
 import { upload } from "@vercel/blob/client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, HardDrive, Send, Upload } from "lucide-react";
+import { CalendarClock, HardDrive, Send, Upload, X } from "lucide-react";
 import type { PublicSocialAccount } from "@/lib/server/meta/types";
 
 function toDatetimeLocal(date: Date) {
@@ -26,13 +26,14 @@ export function ScheduledPostComposer({
   onCreated: () => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoFiles, setVideoFiles] = useState<File[]>([]);
   const [driveStatus, setDriveStatus] = useState<{ configured: boolean; connected: boolean } | null>(null);
   const [useDrive, setUseDrive] = useState(true);
   const [caption, setCaption] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [scheduledAt, setScheduledAt] = useState(() => toDatetimeLocal(new Date(Date.now() + 60 * 60_000)));
   const [submitting, setSubmitting] = useState<"schedule" | "now" | null>(null);
+  const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,25 +61,22 @@ export function ScheduledPostComposer({
   }
 
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(event.target.files ?? []);
+    if (files.length === 0) return;
     setError(null);
-    setVideoFile(file);
+    // Aditivo: selecionar de novo soma aos já escolhidos, em vez de substituir — permite
+    // juntar vídeos de pastas diferentes num único envio em massa.
+    setVideoFiles((current) => [...current, ...files]);
+    event.target.value = "";
   }
 
-  async function submit(mode: "schedule" | "now") {
-    if (!videoFile) {
-      setError("Envie um vídeo antes de publicar.");
-      return;
-    }
-    if (selected.size === 0) {
-      setError("Selecione ao menos uma conta de destino.");
-      return;
-    }
-    setSubmitting(mode);
-    setError(null);
+  function removeVideoFile(index: number) {
+    setVideoFiles((current) => current.filter((_, i) => i !== index));
+  }
 
-    const selectedIds = Array.from(selected);
+  /** Sobe e agenda/publica um único vídeo — mesma lógica de sempre, extraída pra rodar em
+   *  loop quando o usuário seleciona vários de uma vez. */
+  async function submitOneFile(file: File, mode: "schedule" | "now", selectedIds: string[]): Promise<{ ok: true } | { ok: false; error: string }> {
     let payload: Record<string, unknown>;
 
     if (useDrive && driveAvailable) {
@@ -87,27 +85,23 @@ export function ScheduledPostComposer({
       // requisição (limite fixo de ~4.5MB da Vercel, não contornável com maxDuration/memória).
       let blob: { url: string };
       try {
-        blob = await upload(`scheduled-posts/${crypto.randomUUID()}-${videoFile.name}`, videoFile, {
+        blob = await upload(`scheduled-posts/${crypto.randomUUID()}-${file.name}`, file, {
           access: "private",
           handleUploadUrl: "/api/blob/upload",
           multipart: true,
-          contentType: videoFile.type || "video/mp4",
+          contentType: file.type || "video/mp4",
         });
       } catch {
-        setSubmitting(null);
-        setError("Falha ao enviar o vídeo.");
-        return;
+        return { ok: false, error: "Falha ao enviar o vídeo." };
       }
       const uploadRes = await fetch("/api/scheduled-posts/upload-to-drive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ blobUrl: blob.url, filename: videoFile.name, socialAccountId: selectedIds[0] }),
+        body: JSON.stringify({ blobUrl: blob.url, filename: file.name, socialAccountId: selectedIds[0] }),
       });
       if (!uploadRes.ok) {
         const data = await uploadRes.json().catch(() => ({}));
-        setSubmitting(null);
-        setError(data.error || "Falha ao enviar o vídeo para o Google Drive.");
-        return;
+        return { ok: false, error: data.error || "Falha ao enviar o vídeo para o Google Drive." };
       }
       const data = (await uploadRes.json()) as { driveFileId: string; driveFileName: string };
       payload = { videoSource: "drive", driveFileId: data.driveFileId, driveFileName: data.driveFileName };
@@ -120,12 +114,10 @@ export function ScheduledPostComposer({
       }).catch(() => {});
     } else {
       const formData = new FormData();
-      formData.append("file", videoFile);
+      formData.append("file", file);
       const uploadRes = await fetch("/api/upload", { method: "POST", body: formData });
       if (!uploadRes.ok) {
-        setSubmitting(null);
-        setError("Falha ao enviar o vídeo.");
-        return;
+        return { ok: false, error: "Falha ao enviar o vídeo." };
       }
       const data = (await uploadRes.json()) as { url: string };
       payload = { videoSource: "url", videoUrl: data.url };
@@ -141,13 +133,43 @@ export function ScheduledPostComposer({
         socialAccountIds: selectedIds,
       }),
     });
-    setSubmitting(null);
     if (!res.ok) {
       const data = await res.json().catch(() => ({}));
-      setError(data.error || "Falha ao criar a publicação.");
+      return { ok: false, error: data.error || "Falha ao criar a publicação." };
+    }
+    return { ok: true };
+  }
+
+  async function submit(mode: "schedule" | "now") {
+    if (videoFiles.length === 0) {
+      setError("Envie ao menos um vídeo antes de publicar.");
       return;
     }
-    setVideoFile(null);
+    if (selected.size === 0) {
+      setError("Selecione ao menos uma conta de destino.");
+      return;
+    }
+    setSubmitting(mode);
+    setError(null);
+
+    const selectedIds = Array.from(selected);
+    const failures: string[] = [];
+    for (let i = 0; i < videoFiles.length; i += 1) {
+      setProgressLabel(videoFiles.length > 1 ? `Enviando ${i + 1}/${videoFiles.length}` : null);
+      const result = await submitOneFile(videoFiles[i], mode, selectedIds);
+      if (!result.ok) failures.push(`${videoFiles[i].name}: ${result.error}`);
+    }
+
+    setSubmitting(null);
+    setProgressLabel(null);
+    if (failures.length > 0) {
+      setError(
+        failures.length === videoFiles.length
+          ? failures.join(" | ")
+          : `${videoFiles.length - failures.length}/${videoFiles.length} enviados. Falhas — ${failures.join(" | ")}`
+      );
+    }
+    setVideoFiles([]);
     setCaption("");
     setSelected(new Set());
     if (fileInputRef.current) fileInputRef.current.value = "";
@@ -159,15 +181,44 @@ export function ScheduledPostComposer({
       <p className="text-sm font-semibold text-foreground">Novo conteúdo</p>
 
       <div className="mt-4">
-        <p className="mb-1.5 text-[11px] font-semibold uppercase text-muted">Vídeo</p>
-        <input ref={fileInputRef} type="file" accept="video/*" onChange={handleFileChange} className="hidden" id="composer-video-input" />
+        <p className="mb-1.5 text-[11px] font-semibold uppercase text-muted">Vídeo(s)</p>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="video/*"
+          multiple
+          onChange={handleFileChange}
+          className="hidden"
+          id="composer-video-input"
+        />
         <label
           htmlFor="composer-video-input"
-          className="flex h-24 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-xs text-muted hover:bg-card-hover"
+          className="flex h-16 cursor-pointer flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border text-xs text-muted hover:bg-card-hover"
         >
           <Upload size={16} />
-          {videoFile ? videoFile.name : "Clique para enviar um vídeo"}
+          {videoFiles.length > 0 ? "Adicionar mais vídeos" : "Clique para enviar um ou vários vídeos"}
         </label>
+
+        {videoFiles.length > 0 && (
+          <ul className="mt-2 flex flex-col gap-1.5">
+            {videoFiles.map((file, index) => (
+              <li
+                key={`${file.name}-${index}`}
+                className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-gray-200"
+              >
+                <span className="min-w-0 truncate">{file.name}</span>
+                <button
+                  type="button"
+                  aria-label={`Remover ${file.name}`}
+                  onClick={() => removeVideoFile(index)}
+                  className="shrink-0 text-muted hover:text-red-300"
+                >
+                  <X size={13} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {driveStatus?.configured && (
           <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-[11px] text-gray-300">
@@ -237,7 +288,7 @@ export function ScheduledPostComposer({
           className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border bg-[#171717] text-xs font-semibold text-gray-200 hover:bg-card-hover disabled:opacity-50"
         >
           <CalendarClock size={13} />
-          Agendar publicação
+          {submitting === "schedule" && progressLabel ? progressLabel : "Agendar publicação"}
         </button>
         <button
           type="button"
@@ -246,7 +297,7 @@ export function ScheduledPostComposer({
           className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-accent text-xs font-semibold text-background disabled:opacity-50"
         >
           <Send size={13} />
-          Publicar agora
+          {submitting === "now" && progressLabel ? progressLabel : "Publicar agora"}
         </button>
       </div>
     </div>
