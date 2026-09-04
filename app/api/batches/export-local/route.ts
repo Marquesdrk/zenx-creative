@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { del, get, put } from "@vercel/blob";
+import { del, get } from "@vercel/blob";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { BatchItem, Profile } from "@/lib/editor/types";
@@ -149,16 +149,24 @@ export async function POST(request: Request) {
     }
 
     if (responseMode === "video") {
-      // Devolve um blob temporário em vez dos bytes direto na resposta — um vídeo renderizado
-      // facilmente passa dos 4.5MB de limite de payload das functions da Vercel, o que a
-      // plataforma rejeita antes mesmo do nosso código rodar (o cliente baixa do blob e some
-      // com ele logo em seguida via /api/blob/delete).
+      // Devolve como resposta HTTP em streaming em vez de um buffer fechado — um vídeo
+      // renderizado facilmente passa dos 4.5MB de limite de payload das functions "normais" da
+      // Vercel (rejeitado na camada de plataforma, antes do nosso código rodar); streaming não
+      // tem esse teto. (Tentamos um blob temporário antes, mas esse projeto usa um Blob store
+      // privado, que não aceita access "public" nem permite baixar sem o token pela downloadUrl.)
       const rendered = await renderItem(payload.items[0], 0);
-      const blob = await put(`editor-batches/${payload.batchId}/exports/${crypto.randomUUID()}-${rendered.videoFilename}`, rendered.content, {
-        access: "public",
-        contentType: "video/mp4",
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(rendered.content);
+          controller.close();
+        },
       });
-      return NextResponse.json({ blobUrl: blob.url, filename: rendered.videoFilename });
+      return new NextResponse(stream, {
+        headers: {
+          "Content-Type": "video/mp4",
+          "Content-Disposition": `attachment; filename="${rendered.videoFilename}"`,
+        },
+      });
     }
 
     if (responseMode === "drive") {
