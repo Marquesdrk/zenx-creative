@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { del, get } from "@vercel/blob";
+import { del, get, put } from "@vercel/blob";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { BatchItem, Profile } from "@/lib/editor/types";
@@ -149,13 +149,16 @@ export async function POST(request: Request) {
     }
 
     if (responseMode === "video") {
+      // Devolve um blob temporário em vez dos bytes direto na resposta — um vídeo renderizado
+      // facilmente passa dos 4.5MB de limite de payload das functions da Vercel, o que a
+      // plataforma rejeita antes mesmo do nosso código rodar (o cliente baixa do blob e some
+      // com ele logo em seguida via /api/blob/delete).
       const rendered = await renderItem(payload.items[0], 0);
-      return new NextResponse(rendered.content, {
-        headers: {
-          "Content-Type": "video/mp4",
-          "Content-Disposition": `attachment; filename="${rendered.videoFilename}"`,
-        },
+      const blob = await put(`editor-batches/${payload.batchId}/exports/${crypto.randomUUID()}-${rendered.videoFilename}`, rendered.content, {
+        access: "public",
+        contentType: "video/mp4",
       });
+      return NextResponse.json({ blobUrl: blob.url, filename: rendered.videoFilename });
     }
 
     if (responseMode === "drive") {

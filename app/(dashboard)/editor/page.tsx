@@ -298,6 +298,7 @@ export default function EditorPage() {
     setExportProgressLabel(`Exportando 0/${batchItems.length}`);
     setPageError(null);
     let temporaryProfileBlobUrls: string[] = [];
+    const exportedVideoBlobUrls: string[] = [];
     try {
       const exportId = crypto.randomUUID();
       setExportProgressLabel("Preparando template");
@@ -347,7 +348,12 @@ export default function EditorPage() {
             throw new Error(message);
           }
 
-          const content = new Uint8Array(await res.arrayBuffer());
+          // O vídeo renderizado vem como um blob temporário, não como bytes direto na resposta
+          // (evita o limite de ~4.5MB de payload das functions da Vercel).
+          const { blobUrl } = (await res.json()) as { blobUrl: string };
+          exportedVideoBlobUrls.push(blobUrl);
+          const videoRes = await fetch(blobUrl);
+          const content = new Uint8Array(await videoRes.arrayBuffer());
           rendered += 1;
           setExportProgressLabel(`Renderizando ${rendered}/${batchItems.length}`);
           return {
@@ -374,7 +380,7 @@ export default function EditorPage() {
     } catch (error) {
       setPageError(error instanceof Error ? error.message : "Falha ao exportar o lote.");
     } finally {
-      await deleteTemporaryBlobs(temporaryProfileBlobUrls);
+      await deleteTemporaryBlobs([...temporaryProfileBlobUrls, ...exportedVideoBlobUrls]);
       setExportingBatchId(null);
       setExportProgressLabel(null);
     }
