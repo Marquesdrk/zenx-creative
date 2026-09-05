@@ -12,6 +12,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { useProfiles } from "@/lib/editor/profiles-store";
 import { PLATFORM_LABELS, type Batch, type BatchItem, type Platform, type Publication } from "@/lib/editor/types";
+import type { PublicSocialAccount, ScheduledPost, ScheduledPostAccount } from "@/lib/server/meta/types";
 
 const AUTOPOST_PLATFORMS: Platform[] = ["INSTAGRAM", "TIKTOK", "FACEBOOK"];
 
@@ -25,6 +26,27 @@ function statusLabel(publication: Publication) {
   if (publication.status === "PUBLISHED") return "Publicado";
   if (publication.status === "FAILED") return "Erro";
   return publication.scheduledAt ? "Agendado" : "Pendente";
+}
+
+/** Um item da fila do sistema de agendamento novo (contas Meta multi-conta) — 1 linha por
+ *  destino (ScheduledPostAccount), já cruzada com o post e a conta social pra exibir no
+ *  calendário junto dos posts do sistema antigo (lotes/perfis locais). */
+type MetaCalendarEvent = {
+  key: string;
+  date: Date;
+  platform: Platform;
+  title: string;
+  accountLabel: string;
+  statusTone: "idle" | "working" | "success" | "warning" | "danger";
+  statusLabel: string;
+};
+
+function metaStatusInfo(status: ScheduledPostAccount["status"]): { tone: MetaCalendarEvent["statusTone"]; label: string } {
+  if (status === "published") return { tone: "success", label: "Publicado" };
+  if (status === "failed") return { tone: "danger", label: "Erro" };
+  if (status === "processing") return { tone: "working", label: "Publicando" };
+  if (status === "cancelled") return { tone: "warning", label: "Cancelado" };
+  return { tone: "idle", label: "Agendado" };
 }
 
 function monthDays(anchor: Date) {
@@ -53,6 +75,9 @@ export default function CalendarioPage() {
   const [batches, setBatches] = useState<Batch[]>([]);
   const [items, setItems] = useState<BatchItem[]>([]);
   const [publications, setPublications] = useState<Publication[]>([]);
+  const [scheduledPosts, setScheduledPosts] = useState<ScheduledPost[]>([]);
+  const [scheduledPostAccounts, setScheduledPostAccounts] = useState<ScheduledPostAccount[]>([]);
+  const [metaAccounts, setMetaAccounts] = useState<PublicSocialAccount[]>([]);
   const [scheduleByItem, setScheduleByItem] = useState<Record<string, string>>({});
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [defaultSchedule] = useState(() => toDatetimeLocal(new Date(Date.now() + 60 * 60_000)));
@@ -61,7 +86,12 @@ export default function CalendarioPage() {
   const [platformFilter, setPlatformFilter] = useState<Platform | "ALL">("ALL");
 
   const refresh = useCallback(async () => {
-    const [batchRes, publicationRes] = await Promise.all([fetch("/api/batches"), fetch("/api/publications")]);
+    const [batchRes, publicationRes, scheduledRes, accountsRes] = await Promise.all([
+      fetch("/api/batches"),
+      fetch("/api/publications"),
+      fetch("/api/scheduled-posts"),
+      fetch("/api/meta/accounts"),
+    ]);
     if (batchRes.ok) {
       const data = (await batchRes.json()) as { batches: Batch[]; items: BatchItem[] };
       setBatches(data.batches);
@@ -69,6 +99,14 @@ export default function CalendarioPage() {
     }
     if (publicationRes.ok) {
       setPublications((await publicationRes.json()) as Publication[]);
+    }
+    if (scheduledRes.ok) {
+      const data = (await scheduledRes.json()) as { posts: ScheduledPost[]; accounts: ScheduledPostAccount[] };
+      setScheduledPosts(data.posts);
+      setScheduledPostAccounts(data.accounts);
+    }
+    if (accountsRes.ok) {
+      setMetaAccounts((await accountsRes.json()) as PublicSocialAccount[]);
     }
   }, []);
 
@@ -102,12 +140,61 @@ export default function CalendarioPage() {
       .filter((event) => platformFilter === "ALL" || event.publication.platform === platformFilter);
   }, [batches, brandId, items, platformFilter, profiles, publications]);
 
-  const nextPosts = [...events].sort((a, b) => a.date.getTime() - b.date.getTime()).slice(0, 5);
+  // Fila do sistema de agendamento novo (contas Meta multi-conta) — 1 evento por destino
+  // (ScheduledPostAccount), já cruzado com o post e a conta social. Sem filtro de marca: as
+  // "marcas" desse sistema são as próprias contas conectadas, não os perfis locais.
+  const metaEvents = useMemo<MetaCalendarEvent[]>(() => {
+    const postsById = new Map(scheduledPosts.map((post) => [post.id, post]));
+    const accountsById = new Map(metaAccounts.map((account) => [account.id, account]));
+    return scheduledPostAccounts
+      .filter((spa) => spa.status !== "cancelled")
+      .map((spa) => {
+        const post = postsById.get(spa.scheduledPostId);
+        const account = accountsById.get(spa.socialAccountId);
+        if (!post || !account) return null;
+        const date = post.scheduledAt ? new Date(post.scheduledAt) : new Date(post.createdAt);
+        const { tone, label } = metaStatusInfo(spa.status);
+        return {
+          key: spa.id,
+          date,
+          platform: account.platform as Platform,
+          title: post.caption.trim() || post.driveFileName || "Vídeo agendado",
+          accountLabel: account.username ? `@${account.username.replace(/^@/, "")}` : account.accountName,
+          statusTone: tone,
+          statusLabel: label,
+        };
+      })
+      .filter((event): event is MetaCalendarEvent => Boolean(event))
+      .filter((event) => platformFilter === "ALL" || event.platform === platformFilter);
+  }, [scheduledPosts, scheduledPostAccounts, metaAccounts, platformFilter]);
+
+  // Vista unificada só com o necessário pro grid do mês (contagem + ícone por dia) — cada
+  // sistema guarda o resto do detalhe no seu próprio evento (usado no "Próximos posts").
+  const combinedEvents = useMemo(
+    () => [
+      ...events.map((event) => ({ key: event.publication.id, date: event.date, platform: event.publication.platform })),
+      ...metaEvents.map((event) => ({ key: event.key, date: event.date, platform: event.platform })),
+    ],
+    [events, metaEvents]
+  );
+
+  const nextPosts = useMemo(() => {
+    const legacy = events.map((event) => ({ kind: "legacy" as const, date: event.date, data: event }));
+    const meta = metaEvents.map((event) => ({ kind: "meta" as const, date: event.date, data: event }));
+    return [...legacy, ...meta].sort((a, b) => a.date.getTime() - b.date.getTime()).slice(0, 5);
+  }, [events, metaEvents]);
+
   const monthLabel = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(currentMonth);
   const days = monthDays(currentMonth);
-  const monthEvents = events.filter((event) => event.date.getMonth() === currentMonth.getMonth());
-  const pending = events.filter((event) => event.publication.status === "PENDING").length;
-  const published = events.filter((event) => event.publication.status === "PUBLISHED").length;
+  const monthEvents = combinedEvents.filter(
+    (event) => event.date.getMonth() === currentMonth.getMonth() && event.date.getFullYear() === currentMonth.getFullYear()
+  );
+  const pending =
+    events.filter((event) => event.publication.status === "PENDING").length +
+    metaEvents.filter((event) => event.statusTone === "idle" || event.statusTone === "working").length;
+  const published =
+    events.filter((event) => event.publication.status === "PUBLISHED").length +
+    metaEvents.filter((event) => event.statusTone === "success").length;
 
   async function schedulePublication(item: BatchItem, platform: Platform, publishNow = false) {
     const key = `${item.id}:${platform}`;
@@ -124,7 +211,10 @@ export default function CalendarioPage() {
 
   async function runDue() {
     setBusyKey("run-due");
-    await fetch("/api/publications/run-due", { method: "POST" });
+    await Promise.all([
+      fetch("/api/publications/run-due", { method: "POST" }),
+      fetch("/api/scheduled-posts/run-due", { method: "POST" }),
+    ]);
     setBusyKey(null);
     await refresh();
   }
@@ -209,7 +299,7 @@ export default function CalendarioPage() {
             </div>
             <div className="grid grid-cols-7">
               {days.map((day) => {
-                const dayEvents = events.filter((event) => sameDay(event.date, day));
+                const dayEvents = combinedEvents.filter((event) => sameDay(event.date, day));
                 const inMonth = day.getMonth() === currentMonth.getMonth();
                 const isToday = sameDay(day, new Date());
                 return (
@@ -217,8 +307,8 @@ export default function CalendarioPage() {
                     <div className={`text-sm font-semibold ${inMonth ? "text-foreground" : "text-muted/50"}`}>{day.getDate()}</div>
                     <div className="mt-3 space-y-1">
                       {dayEvents.slice(0, 3).map((event) => (
-                        <div key={event.publication.id} className="flex items-center gap-1.5 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground">
-                          <PlatformIcon platform={event.publication.platform} size="sm" />
+                        <div key={event.key} className="flex items-center gap-1.5 rounded-md bg-white/[0.04] px-2 py-1 text-xs text-foreground">
+                          <PlatformIcon platform={event.platform} size="sm" />
                           <span>{new Intl.DateTimeFormat("pt-BR", { hour: "2-digit", minute: "2-digit" }).format(event.date)}</span>
                         </div>
                       ))}
@@ -276,21 +366,38 @@ export default function CalendarioPage() {
               {nextPosts.length === 0 ? (
                 <div className="rounded-lg border border-dashed border-border p-5 text-sm text-muted">Nenhum post agendado para este período.</div>
               ) : (
-                nextPosts.map((event) => (
-                  <div key={event.publication.id} className="flex items-center gap-3 rounded-lg border border-border bg-[#101014] p-3">
-                    <div className="w-14">
-                      <VideoFrame profile={event.profile} title={event.item.manualOverrides.title} caption={event.item.manualOverrides.caption} contentUrl={event.item.renderedUrl ?? event.item.contentUrl} contentCrop={event.item.manualOverrides.crop} contentZoom={event.item.manualOverrides.zoom} contentFit={event.item.manualOverrides.fit} contentRotation={event.item.manualOverrides.rotation} watermarkPosition={event.item.manualOverrides.watermarkPosition} xStyleVideoFrame={event.item.manualOverrides.xStyleVideoFrame} />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2 text-xs text-muted">
-                        <PlatformIcon platform={event.publication.platform} size="sm" />
-                        {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(event.date)}
+                nextPosts.map((post) =>
+                  post.kind === "legacy" ? (
+                    <div key={`legacy-${post.data.publication.id}`} className="flex items-center gap-3 rounded-lg border border-border bg-[#101014] p-3">
+                      <div className="w-14">
+                        <VideoFrame profile={post.data.profile} title={post.data.item.manualOverrides.title} caption={post.data.item.manualOverrides.caption} contentUrl={post.data.item.renderedUrl ?? post.data.item.contentUrl} contentCrop={post.data.item.manualOverrides.crop} contentZoom={post.data.item.manualOverrides.zoom} contentFit={post.data.item.manualOverrides.fit} contentRotation={post.data.item.manualOverrides.rotation} watermarkPosition={post.data.item.manualOverrides.watermarkPosition} xStyleVideoFrame={post.data.item.manualOverrides.xStyleVideoFrame} />
                       </div>
-                      <p className="mt-1 truncate text-sm font-semibold text-foreground">{event.profile.name}</p>
-                      <StatusBadge tone={event.publication.status === "FAILED" ? "danger" : event.publication.status === "PUBLISHED" ? "success" : "idle"}>{statusLabel(event.publication)}</StatusBadge>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 text-xs text-muted">
+                          <PlatformIcon platform={post.data.publication.platform} size="sm" />
+                          {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(post.data.date)}
+                        </div>
+                        <p className="mt-1 truncate text-sm font-semibold text-foreground">{post.data.profile.name}</p>
+                        <StatusBadge tone={post.data.publication.status === "FAILED" ? "danger" : post.data.publication.status === "PUBLISHED" ? "success" : "idle"}>{statusLabel(post.data.publication)}</StatusBadge>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  ) : (
+                    <div key={`meta-${post.data.key}`} className="flex items-center gap-3 rounded-lg border border-border bg-[#101014] p-3">
+                      <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-white/[0.04]">
+                        <PlatformIcon platform={post.data.platform} />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2 text-xs text-muted">
+                          <PlatformIcon platform={post.data.platform} size="sm" />
+                          {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(post.data.date)}
+                        </div>
+                        <p className="mt-1 truncate text-sm font-semibold text-foreground">{post.data.accountLabel}</p>
+                        <p className="truncate text-xs text-muted">{post.data.title}</p>
+                        <StatusBadge tone={post.data.statusTone}>{post.data.statusLabel}</StatusBadge>
+                      </div>
+                    </div>
+                  )
+                )
               )}
             </div>
           </AppCard>
