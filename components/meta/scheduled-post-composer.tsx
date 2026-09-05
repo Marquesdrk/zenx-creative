@@ -7,6 +7,12 @@ import type { PublicSocialAccount } from "@/lib/server/meta/types";
 
 const IS_VERCEL = Boolean(process.env.NEXT_PUBLIC_IS_VERCEL);
 
+function addDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
 function toDatetimeLocal(date: Date) {
   const offset = date.getTimezoneOffset();
   const local = new Date(date.getTime() - offset * 60_000);
@@ -77,8 +83,15 @@ export function ScheduledPostComposer({
   }
 
   /** Sobe e agenda/publica um único vídeo — mesma lógica de sempre, extraída pra rodar em
-   *  loop quando o usuário seleciona vários de uma vez. */
-  async function submitOneFile(file: File, mode: "schedule" | "now", selectedIds: string[]): Promise<{ ok: true } | { ok: false; error: string }> {
+   *  loop quando o usuário seleciona vários de uma vez. `scheduledFor` é a data já calculada
+   *  pra ESTE arquivo especificamente (ver `submit`) — nunca reaproveita o mesmo horário pra
+   *  vários vídeos, ou todos publicariam juntos no mesmo instante. */
+  async function submitOneFile(
+    file: File,
+    mode: "schedule" | "now",
+    selectedIds: string[],
+    scheduledFor: Date | null
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
     let payload: Record<string, unknown>;
 
     if (useDrive && driveAvailable) {
@@ -147,7 +160,7 @@ export function ScheduledPostComposer({
       body: JSON.stringify({
         ...payload,
         caption,
-        scheduledAt: mode === "now" ? null : new Date(scheduledAt).toISOString(),
+        scheduledAt: mode === "now" ? null : scheduledFor!.toISOString(),
         socialAccountIds: selectedIds,
       }),
     });
@@ -171,10 +184,14 @@ export function ScheduledPostComposer({
     setError(null);
 
     const selectedIds = Array.from(selected);
+    const baseScheduledAt = new Date(scheduledAt);
     const failures: string[] = [];
     for (let i = 0; i < videoFiles.length; i += 1) {
       setProgressLabel(videoFiles.length > 1 ? `Enviando ${i + 1}/${videoFiles.length}` : null);
-      const result = await submitOneFile(videoFiles[i], mode, selectedIds);
+      // Com mais de um vídeo, cada um pega o dia seguinte no mesmo horário escolhido — nunca
+      // reaproveita a mesma data pra todos (isso publicaria o lote inteiro de uma vez só).
+      const scheduledFor = mode === "schedule" ? addDays(baseScheduledAt, i) : null;
+      const result = await submitOneFile(videoFiles[i], mode, selectedIds, scheduledFor);
       if (!result.ok) failures.push(`${videoFiles[i].name}: ${result.error}`);
     }
 
@@ -294,6 +311,14 @@ export function ScheduledPostComposer({
             className="mt-1 w-full rounded-md border border-border bg-[#171717] px-2 py-1.5 text-xs normal-case text-foreground"
           />
         </label>
+        {videoFiles.length > 1 && (
+          <p className="mt-1.5 text-[11px] normal-case text-gray-400">
+            {videoFiles.length} vídeos → 1 por dia neste horário, começando em{" "}
+            {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(new Date(scheduledAt))} (até{" "}
+            {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(addDays(new Date(scheduledAt), videoFiles.length - 1))}
+            ). Pra postar vários no mesmo dia, use o agendamento automático em massa abaixo.
+          </p>
+        )}
       </div>
 
       {error && <p className="mt-3 rounded-lg bg-red-500/10 p-2 text-xs text-red-300">{error}</p>}
