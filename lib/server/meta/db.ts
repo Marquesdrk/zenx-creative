@@ -288,6 +288,16 @@ export const scheduledPostsRepo = {
     throwIfError(null, error);
   },
 
+  /** Reagenda um post ainda não processado — o scheduler (listDue) lê `scheduled_at` direto
+   *  desta tabela, então basta atualizar aqui pra mudar quando ele fica "devido". */
+  async updateScheduledAt(id: string, scheduledAt: string): Promise<void> {
+    const { error } = await getSupabaseAdmin()
+      .from("scheduled_posts")
+      .update({ scheduled_at: scheduledAt, updated_at: new Date().toISOString() })
+      .eq("id", id);
+    throwIfError(null, error);
+  },
+
   /** Recalcula o status agregado a partir dos destinos (scheduled_post_accounts) e persiste.
    *  Um erro num destino nunca derruba os demais — isso só reflete o agregado pra listagem. */
   async syncStatusFromAccounts(id: string): Promise<void> {
