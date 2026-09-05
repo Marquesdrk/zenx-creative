@@ -7,16 +7,18 @@ export const BEST_TIME_SLOTS = ["08:00", "11:00", "13:00", "15:00", "17:00", "19
 
 export const MAX_VIDEOS_PER_DAY = BEST_TIME_SLOTS.length;
 
-/** Escolhe `count` horários dentre os disponíveis, espaçados o mais uniformemente possível ao
- *  longo do dia (em vez de sempre pegar os N primeiros) — com 2 vídeos/dia, por exemplo, usa um
- *  de manhã e um à noite em vez de dois seguidos de manhã. */
-export function pickTimeSlots(count: number): string[] {
-  const clamped = Math.max(1, Math.min(count, BEST_TIME_SLOTS.length));
-  if (clamped === BEST_TIME_SLOTS.length) return [...BEST_TIME_SLOTS];
-  if (clamped === 1) return [BEST_TIME_SLOTS[Math.floor((BEST_TIME_SLOTS.length - 1) / 2)]];
-  const step = (BEST_TIME_SLOTS.length - 1) / (clamped - 1);
+/** Escolhe `count` horários dentre os disponíveis (`BEST_TIME_SLOTS` por padrão, mas o usuário
+ *  pode substituir pelos próprios horários — ver TimeSlotsEditor), espaçados o mais
+ *  uniformemente possível ao longo do dia (em vez de sempre pegar os N primeiros) — com 2
+ *  vídeos/dia, por exemplo, usa um de manhã e um à noite em vez de dois seguidos de manhã. */
+export function pickTimeSlots(count: number, availableSlots: string[] = BEST_TIME_SLOTS): string[] {
+  const slots = availableSlots.length > 0 ? availableSlots : BEST_TIME_SLOTS;
+  const clamped = Math.max(1, Math.min(count, slots.length));
+  if (clamped === slots.length) return [...slots];
+  if (clamped === 1) return [slots[Math.floor((slots.length - 1) / 2)]];
+  const step = (slots.length - 1) / (clamped - 1);
   const indices = Array.from({ length: clamped }, (_, i) => Math.round(i * step));
-  return indices.map((i) => BEST_TIME_SLOTS[i]);
+  return indices.map((i) => slots[i]);
 }
 
 function atTime(day: Date, hhmm: string): Date {
@@ -32,11 +34,12 @@ function addDays(date: Date, days: number): Date {
   return result;
 }
 
-/** Distribui `count` vídeos em `perDay` por dia, nos melhores horários, a partir de agora —
- *  pula qualquer horário que já tenha passado hoje em vez de agendar no passado. Devolve um
- *  timestamp por vídeo, na mesma ordem (o vídeo mais antigo no Drive publica primeiro). */
-export function planSchedule(count: number, perDay: number, from: Date = new Date()): Date[] {
-  const slots = pickTimeSlots(perDay);
+/** Distribui `count` vídeos em `perDay` por dia, nos melhores horários (ou nos horários
+ *  customizados em `availableSlots`), a partir de agora — pula qualquer horário que já tenha
+ *  passado hoje em vez de agendar no passado. Devolve um timestamp por vídeo, na mesma ordem (o
+ *  vídeo mais antigo no Drive publica primeiro). */
+export function planSchedule(count: number, perDay: number, from: Date = new Date(), availableSlots: string[] = BEST_TIME_SLOTS): Date[] {
+  const slots = pickTimeSlots(perDay, availableSlots);
   const result: Date[] = [];
   let dayOffset = 0;
   // Se algum horário de hoje ainda não passou, começa hoje; senão só amanhã.
