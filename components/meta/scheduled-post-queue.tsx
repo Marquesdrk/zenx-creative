@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { HardDrive, Play, X } from "lucide-react";
+import { HardDrive, Play, RotateCw, X } from "lucide-react";
 import type { PublicSocialAccount, ScheduledPost, ScheduledPostAccount, ScheduledPostAccountStatus } from "@/lib/server/meta/types";
 
 const CANCELLABLE_STATUSES: ScheduledPostAccountStatus[] = ["scheduled", "failed"];
@@ -44,6 +44,13 @@ export function ScheduledPostQueue({
   async function cancelDestination(id: string) {
     setCancellingId(id);
     await fetch(`/api/scheduled-posts/accounts/${id}/cancel`, { method: "POST" }).catch(() => {});
+    setCancellingId(null);
+    onChanged();
+  }
+
+  async function retryDestination(id: string) {
+    setCancellingId(id);
+    await fetch(`/api/scheduled-posts/accounts/${id}/retry`, { method: "POST" }).catch(() => {});
     setCancellingId(null);
     onChanged();
   }
@@ -118,6 +125,17 @@ export function ScheduledPostQueue({
                               <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_CLASS[destination.status]}`}>
                                 {STATUS_LABEL[destination.status]}
                               </span>
+                              {destination.status === "failed" && (
+                                <button
+                                  type="button"
+                                  onClick={() => void retryDestination(destination.id)}
+                                  disabled={cancellingId === destination.id}
+                                  title="Tentar publicar de novo"
+                                  className="text-muted hover:text-accent disabled:opacity-50"
+                                >
+                                  <RotateCw size={12} />
+                                </button>
+                              )}
                               {cancellable && (
                                 <button
                                   type="button"
