@@ -17,7 +17,6 @@ import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
 import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
 
-const MAX_PARALLEL_UPLOADS = 6;
 const MAX_PARALLEL_RENDERS = 3;
 
 type TemporaryAssetUpload = {
@@ -304,12 +303,19 @@ export default function EditorPage() {
       const uploadedProfileAssets = await uploadTemporaryProfileAssets(profile, batchId, exportId);
       const renderProfile = uploadedProfileAssets.profile;
       temporaryProfileBlobUrls = uploadedProfileAssets.blobUrls;
-      let uploaded = 0;
 
-      const uploadedItems = await mapWithConcurrency(
+      // Sobe e renderiza um item por vez (concorrência limitada) em vez de subir o lote inteiro
+      // pro Blob antes de começar a renderizar: o Blob desse projeto está no limite de 1GB do
+      // plano Hobby, e um lote de 60 vídeos sozinho já passa disso — subir tudo de uma vez
+      // deixava dezenas de vídeos originais parados no Blob ao mesmo tempo. Cada original some
+      // do Blob assim que a própria renderização termina (rota export-local já cuida disso).
+      let uploaded = 0;
+      let rendered = 0;
+      setExportProgressLabel(`Exportando 0/${batchItems.length}`);
+      const zipFiles = await mapWithConcurrency(
         batchItems.map((item, index) => ({ item, index })),
-        MAX_PARALLEL_UPLOADS,
-        async ({ item }) => {
+        MAX_PARALLEL_RENDERS,
+        async ({ item, index }) => {
           const file = fileRefs.current.get(item.id);
           if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
 
@@ -319,28 +325,18 @@ export default function EditorPage() {
             multipart: true,
             contentType: file.type || "video/mp4",
           });
-
           uploaded += 1;
           setExportProgressLabel(`Enviando ${uploaded}/${batchItems.length}`);
-          return {
-            ...item,
-            blobUrl: blob.url,
-            blobDownloadUrl: blob.downloadUrl,
-            blobPathname: blob.pathname,
-          };
-        }
-      );
 
-      let rendered = 0;
-      setExportProgressLabel(`Renderizando 0/${batchItems.length}`);
-      const zipFiles = await mapWithConcurrency(
-        uploadedItems.map((item, index) => ({ item, index })),
-        MAX_PARALLEL_RENDERS,
-        async ({ item, index }) => {
           const res = await fetch("/api/batches/export-local", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ batchId, profile: renderProfile, response: "video", items: [item] }),
+            body: JSON.stringify({
+              batchId,
+              profile: renderProfile,
+              response: "video",
+              items: [{ ...item, blobUrl: blob.url, blobDownloadUrl: blob.downloadUrl, blobPathname: blob.pathname }],
+            }),
           });
           if (!res.ok) {
             const message = await responseErrorMessage(res, `Falha ao exportar "${item.filename}" (${res.status}).`);
