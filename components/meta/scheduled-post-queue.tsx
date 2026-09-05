@@ -1,7 +1,10 @@
 "use client";
 
-import { HardDrive, Play } from "lucide-react";
+import { useState } from "react";
+import { HardDrive, Play, X } from "lucide-react";
 import type { PublicSocialAccount, ScheduledPost, ScheduledPostAccount, ScheduledPostAccountStatus } from "@/lib/server/meta/types";
+
+const CANCELLABLE_STATUSES: ScheduledPostAccountStatus[] = ["scheduled", "failed"];
 
 const STATUS_LABEL: Record<ScheduledPostAccountStatus, string> = {
   scheduled: "Agendado",
@@ -27,13 +30,24 @@ export function ScheduledPostQueue({
   accountsById,
   onRunDue,
   runningDue,
+  onChanged,
 }: {
   posts: ScheduledPost[];
   accounts: ScheduledPostAccount[];
   accountsById: Map<string, PublicSocialAccount>;
   onRunDue: () => void;
   runningDue: boolean;
+  onChanged: () => void;
 }) {
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  async function cancelDestination(id: string) {
+    setCancellingId(id);
+    await fetch(`/api/scheduled-posts/accounts/${id}/cancel`, { method: "POST" }).catch(() => {});
+    setCancellingId(null);
+    onChanged();
+  }
+
   return (
     <aside className="rounded-xl border border-border bg-[#0d0d0d]">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -94,13 +108,27 @@ export function ScheduledPostQueue({
                     ) : (
                       destinations.map((destination) => {
                         const account = accountsById.get(destination.socialAccountId);
+                        const cancellable = CANCELLABLE_STATUSES.includes(destination.status);
                         return (
                           <div key={destination.id} className="flex items-center justify-between gap-2 rounded-md bg-background px-2 py-1.5">
                             <span className="truncate text-[11px] text-gray-300">
                               {account ? `${account.platform === "INSTAGRAM" ? "IG" : "FB"} · ${account.accountName}` : "Conta removida"}
                             </span>
-                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_CLASS[destination.status]}`}>
-                              {STATUS_LABEL[destination.status]}
+                            <span className="flex shrink-0 items-center gap-1.5">
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${STATUS_CLASS[destination.status]}`}>
+                                {STATUS_LABEL[destination.status]}
+                              </span>
+                              {cancellable && (
+                                <button
+                                  type="button"
+                                  onClick={() => void cancelDestination(destination.id)}
+                                  disabled={cancellingId === destination.id}
+                                  title="Cancelar este agendamento"
+                                  className="text-muted hover:text-red-300 disabled:opacity-50"
+                                >
+                                  <X size={12} />
+                                </button>
+                              )}
                             </span>
                           </div>
                         );

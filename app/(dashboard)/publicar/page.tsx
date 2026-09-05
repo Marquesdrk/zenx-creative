@@ -72,6 +72,7 @@ export default function PublicarPage() {
           accountsById={accountsById}
           onRunDue={runDue}
           runningDue={runningDue}
+          onChanged={refresh}
         />
       </div>
     </div>
