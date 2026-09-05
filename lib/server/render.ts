@@ -6,6 +6,7 @@ import * as PImage from "pureimage";
 import { get } from "@vercel/blob";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { effectiveDimensions, fitCenteredRect, normalizedCropToPixels } from "@/lib/editor/crop-geometry";
 import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
@@ -25,6 +26,13 @@ const ROTATE_FILTERS: Record<number, string[]> = {
   180: ["hflip", "vflip"],
   270: ["transpose=2"],
 };
+
+// Sem isso, cada processo do libx264 tenta usar TODOS os cores da máquina — com vários itens
+// renderizando em paralelo (MAX_PARALLEL_RENDERS no editor, hoje 3), isso satura o PC inteiro
+// em vez de só a CPU disponível pro processo. Divide ~75% dos cores entre os renders
+// simultâneos esperados, deixando o resto livre pro sistema continuar responsivo.
+const ASSUMED_CONCURRENT_RENDERS = 3;
+const ENCODE_THREADS = Math.max(1, Math.floor((os.cpus().length * 0.75) / ASSUMED_CONCURRENT_RENDERS));
 
 const TEXT_FONT_PATH = path.join(process.cwd(), "assets", "fonts", "arialbd.ttf");
 const WHATSAPP_EMOJI_DIR = path.join(process.cwd(), "public", "whatsapp-emoji", "png");
@@ -184,6 +192,8 @@ function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: s
       "ultrafast",
       "-crf",
       "27",
+      "-threads",
+      String(ENCODE_THREADS),
       "-pix_fmt",
       "yuv420p",
       "-c:a",
