@@ -40,7 +40,7 @@ export default function PublicarPage() {
 
   async function runDue() {
     setRunningDue(true);
-    await fetch("/api/scheduled-posts/run-due", { method: "POST" });
+    await fetch("/api/scheduled-posts/run-due-manual", { method: "POST" });
     setRunningDue(false);
     await refresh();
   }

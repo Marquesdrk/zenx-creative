@@ -213,7 +213,7 @@ export default function CalendarioPage() {
     setBusyKey("run-due");
     await Promise.all([
       fetch("/api/publications/run-due", { method: "POST" }),
-      fetch("/api/scheduled-posts/run-due", { method: "POST" }),
+      fetch("/api/scheduled-posts/run-due-manual", { method: "POST" }),
     ]);
     setBusyKey(null);
     await refresh();

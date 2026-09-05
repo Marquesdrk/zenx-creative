@@ -6,26 +6,30 @@ import { runDueScheduledPosts } from "@/lib/server/scheduler";
 // tem teto bem menor que isso; Pro suporta até 300s aqui).
 export const maxDuration = 300;
 
-/** Disparado periodicamente por um agendador — ver vercel.json (Vercel Cron Jobs) ou, fora da
- *  Vercel, cron do SO / serviço de ping externo (docs/META_INTEGRATION_SETUP.md, seção 8).
- *  Também pode ser chamado manualmente pelo botão "Rodar pendentes" na tela de Publicar.
- *  Protegido por CRON_SECRET quando definido: a Vercel envia automaticamente
- *  `Authorization: Bearer $CRON_SECRET` nas chamadas do Cron Jobs configurado — qualquer outra
- *  chamada sem esse header é rejeitada, pra ninguém disparar publicações de fora sem querer. */
-export async function POST(request: Request) {
+/** Disparado periodicamente por um agendador externo — o workflow em
+ *  .github/workflows/run-scheduled-posts.yml chama isso a cada 5min via POST com
+ *  `Authorization: Bearer $CRON_SECRET`; vercel.json também tem um Cron Job diário como rede
+ *  de segurança (via GET, com o mesmo header, injetado automaticamente pela Vercel). Protegido
+ *  por CRON_SECRET quando definido — sem isso, qualquer um que descobrisse essa URL pública
+ *  poderia disparar publicações à força. Para o botão "Rodar pendentes" da UI (que não deve
+ *  carregar esse segredo pro navegador), use /api/scheduled-posts/run-due-manual. */
+function assertAuthorized(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
-  if (secret) {
-    const auth = request.headers.get("authorization");
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
-    }
+  if (!secret) return null;
+  const auth = request.headers.get("authorization");
+  if (auth !== `Bearer ${secret}`) {
+    return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
   }
+  return null;
+}
+
+export async function POST(request: Request) {
+  const unauthorized = assertAuthorized(request);
+  if (unauthorized) return unauthorized;
   const result = await runDueScheduledPosts();
   return NextResponse.json(result);
 }
 
-/** Vercel Cron Jobs só suporta GET por padrão — aceitamos GET como alias de POST pra esse caso,
- *  mantendo POST livre pro botão manual "Rodar pendentes" da UI (fetch simples, sem header). */
 export async function GET(request: Request) {
   return POST(request);
 }
