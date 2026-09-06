@@ -37,6 +37,9 @@ type MetaCalendarEvent = {
   platform: Platform;
   title: string;
   accountLabel: string;
+  /** username normalizado (sem @, minúsculo) — usado só pra cruzar com o @handle do perfil
+   *  local na hora de filtrar por marca; null quando a conta não tem username salvo. */
+  accountUsername: string | null;
   statusTone: "idle" | "working" | "success" | "warning" | "danger";
   statusLabel: string;
 };
@@ -140,9 +143,19 @@ export default function CalendarioPage() {
       .filter((event) => platformFilter === "ALL" || event.publication.platform === platformFilter);
   }, [batches, brandId, items, platformFilter, profiles, publications]);
 
+  // Não existe vínculo direto (chave estrangeira) entre um perfil local (marca) e uma conta
+  // Meta conectada — a única correlação disponível é o @handle do perfil batendo com o
+  // username da conta (convenção usada ao criar os perfis X_STYLE), então é assim que o filtro
+  // de marca também restringe a fila do sistema de agendamento novo.
+  const selectedBrandHandle = useMemo(() => {
+    if (brandId === "ALL") return null;
+    const profile = profiles.find((candidate) => candidate.id === brandId);
+    const handle = profile?.engine === "X_STYLE" ? profile.handle : null;
+    return handle ? handle.replace(/^@/, "").toLowerCase() : null;
+  }, [brandId, profiles]);
+
   // Fila do sistema de agendamento novo (contas Meta multi-conta) — 1 evento por destino
-  // (ScheduledPostAccount), já cruzado com o post e a conta social. Sem filtro de marca: as
-  // "marcas" desse sistema são as próprias contas conectadas, não os perfis locais.
+  // (ScheduledPostAccount), já cruzado com o post e a conta social.
   const metaEvents = useMemo<MetaCalendarEvent[]>(() => {
     const postsById = new Map(scheduledPosts.map((post) => [post.id, post]));
     const accountsById = new Map(metaAccounts.map((account) => [account.id, account]));
@@ -160,13 +173,15 @@ export default function CalendarioPage() {
           platform: account.platform as Platform,
           title: post.caption.trim() || post.driveFileName || "Vídeo agendado",
           accountLabel: account.username ? `@${account.username.replace(/^@/, "")}` : account.accountName,
+          accountUsername: account.username?.replace(/^@/, "").toLowerCase() ?? null,
           statusTone: tone,
           statusLabel: label,
         };
       })
       .filter((event): event is MetaCalendarEvent => Boolean(event))
-      .filter((event) => platformFilter === "ALL" || event.platform === platformFilter);
-  }, [scheduledPosts, scheduledPostAccounts, metaAccounts, platformFilter]);
+      .filter((event) => platformFilter === "ALL" || event.platform === platformFilter)
+      .filter((event) => !selectedBrandHandle || event.accountUsername === selectedBrandHandle);
+  }, [scheduledPosts, scheduledPostAccounts, metaAccounts, platformFilter, selectedBrandHandle]);
 
   // Vista unificada só com o necessário pro grid do mês (contagem + ícone por dia) — cada
   // sistema guarda o resto do detalhe no seu próprio evento (usado no "Próximos posts").
