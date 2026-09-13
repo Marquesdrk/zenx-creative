@@ -7,10 +7,13 @@ import type { ScheduledPost, ScheduledPostAccount } from "@/lib/server/meta/type
  *  agendados junto com todos os destinos (1 linha por conta), pra tela de Publicar montar a
  *  fila sem N+1 requests. */
 export async function GET() {
-  const posts = await scheduledPostsRepo.list();
-  const accountsByPost = await Promise.all(posts.map((post) => scheduledPostAccountsRepo.listByPost(post.id)));
-  const accounts = accountsByPost.flat();
-  return NextResponse.json({ posts, accounts });
+  try {
+    const [posts, accounts] = await Promise.all([scheduledPostsRepo.list(), scheduledPostAccountsRepo.listAll()]);
+    return NextResponse.json({ posts, accounts });
+  } catch (error) {
+    console.error("[scheduled-posts] list failed", error);
+    return NextResponse.json({ error: getErrorMessage(error) }, { status: 503 });
+  }
 }
 
 type CreateBody = {
@@ -24,10 +27,9 @@ type CreateBody = {
 };
 
 /** Cria 1 vídeo agendado com N destinos independentes (1 por conta selecionada). Se
- *  `scheduledAt` for nulo ou já tiver passado ("Publicar agora"), dispara o processamento sem
- *  bloquear a resposta HTTP — a Instagram/Facebook Reels API é assíncrona e pode levar minutos
- *  processando o vídeo (ver lib/server/meta/instagram.ts), então o cliente acompanha o status
- *  via GET nesta mesma rota em vez de esperar a resposta deste POST. */
+ *  `scheduledAt` for nulo ou já tiver passado ("Publicar agora"), processa esse primeiro destino
+ *  antes de responder. Assim o vídeo de teste é tentado antes de o lote continuar; os vídeos
+ *  futuros continuam sendo tratados pelo scheduler. */
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as CreateBody | null;
   const videoSource: "url" | "drive" = body?.videoSource === "drive" ? "drive" : "url";
@@ -36,7 +38,19 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Informe um vídeo e ao menos uma conta de destino." }, { status: 400 });
   }
 
-  const fetchedAccounts = await Promise.all(body.socialAccountIds.map((id) => socialAccountsRepo.get(id)));
+  let fetchedAccounts: Awaited<ReturnType<typeof socialAccountsRepo.get>>[];
+  try {
+    fetchedAccounts = await withDatabaseRetry(() =>
+      Promise.all(body.socialAccountIds.map((id) => socialAccountsRepo.get(id)))
+    );
+  } catch (error) {
+    const retryable = isTransientDatabaseError(error);
+    console.error("[scheduled-posts] account lookup failed", error);
+    return NextResponse.json(
+      { error: getErrorMessage(error), code: "SCHEDULE_ACCOUNT_LOOKUP_FAILED", retryable },
+      { status: retryable ? 503 : 500 }
+    );
+  }
   const accounts = fetchedAccounts.filter((a): a is NonNullable<typeof a> => Boolean(a));
   if (accounts.length === 0) {
     return NextResponse.json({ error: "Nenhuma das contas selecionadas foi encontrada." }, { status: 400 });
@@ -59,33 +73,76 @@ export async function POST(request: Request) {
     createdAt: now,
     updatedAt: now,
   };
-  await scheduledPostsRepo.create(post);
+  try {
+    await withDatabaseRetry(() => scheduledPostsRepo.create(post));
 
-  for (const account of accounts) {
-    const spa: ScheduledPostAccount = {
-      id: crypto.randomUUID(),
-      scheduledPostId: post.id,
-      socialAccountId: account.id,
-      status: "scheduled",
-      externalPostId: null,
-      errorCode: null,
-      errorMessage: null,
-      recoverable: null,
-      attemptCount: 0,
-      nextAttemptAt: null,
-      publishedAt: null,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await scheduledPostAccountsRepo.create(spa);
+    for (const account of accounts) {
+      const spa: ScheduledPostAccount = {
+        id: crypto.randomUUID(),
+        scheduledPostId: post.id,
+        socialAccountId: account.id,
+        status: "scheduled",
+        externalPostId: null,
+        errorCode: null,
+        errorMessage: null,
+        recoverable: null,
+        attemptCount: 0,
+        nextAttemptAt: null,
+        publishedAt: null,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await withDatabaseRetry(() => scheduledPostAccountsRepo.create(spa));
+    }
+
+    const createdAccounts = await withDatabaseRetry(() => scheduledPostAccountsRepo.listByPost(post.id));
+    if (isImmediate) {
+      // O primeiro vídeo é o teste solicitado pelo usuário. Aguardar a tentativa torna o
+      // resultado observável na tela e impede que o lote seja considerado concluído sem teste.
+      await processAllPendingAccountsForPost(post.id).catch((error) => {
+        console.error("[scheduled-posts] immediate publish failed", error);
+      });
+    }
+    return NextResponse.json({ post, accounts: createdAccounts }, { status: 201 });
+  } catch (error) {
+    // O upload para o Drive acontece antes desta rota. Se o banco falhar, removemos o registro
+    // parcial (a FK em scheduled_post_accounts também limpa os destinos) e devolvemos uma
+    // mensagem estruturada para a tela poder exibir a causa real e repetir o envio.
+    try {
+      await withDatabaseRetry(() => scheduledPostsRepo.remove(post.id));
+    } catch (cleanupError) {
+      console.error("[scheduled-posts] cleanup failed", cleanupError);
+    }
+    const retryable = isTransientDatabaseError(error);
+    console.error("[scheduled-posts] create failed", error);
+    return NextResponse.json(
+      { error: getErrorMessage(error), code: "SCHEDULE_CREATE_FAILED", retryable },
+      { status: retryable ? 503 : 500 }
+    );
   }
+}
 
-  if (isImmediate) {
-    // Não aguardamos — o processo Node segue rodando isso em segundo plano após a resposta
-    // (servidor self-hosted de longa duração, não uma função serverless que congela).
-    void processAllPendingAccountsForPost(post.id);
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Falha inesperada ao salvar o agendamento.";
+}
+
+function isTransientDatabaseError(error: unknown): boolean {
+  const message = getErrorMessage(error).toLowerCase();
+  return ["fetch failed", "econnreset", "econnrefused", "etimedout", "timeout", "503", "502", "504"].some((part) =>
+    message.includes(part)
+  );
+}
+
+async function withDatabaseRetry<T>(operation: () => Promise<T>, attempts = 3): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      if (!isTransientDatabaseError(error) || attempt === attempts - 1) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)));
+    }
   }
-
-  const createdAccounts = await scheduledPostAccountsRepo.listByPost(post.id);
-  return NextResponse.json({ post, accounts: createdAccounts }, { status: 201 });
+  throw lastError;
 }

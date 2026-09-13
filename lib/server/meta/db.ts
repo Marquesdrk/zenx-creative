@@ -280,6 +280,11 @@ export const scheduledPostsRepo = {
     throwIfError(null, error);
   },
 
+  async remove(id: string): Promise<void> {
+    const { error } = await getSupabaseAdmin().from("scheduled_posts").delete().eq("id", id);
+    throwIfError(null, error);
+  },
+
   async updateStatus(id: string, status: ScheduledPostStatus): Promise<void> {
     const { error } = await getSupabaseAdmin()
       .from("scheduled_posts")
@@ -348,6 +353,14 @@ function scheduledPostAccountFromRow(row: ScheduledPostAccountRow): ScheduledPos
 }
 
 export const scheduledPostAccountsRepo = {
+  async listAll(): Promise<ScheduledPostAccount[]> {
+    const { data, error } = await getSupabaseAdmin()
+      .from("scheduled_post_accounts")
+      .select("*")
+      .order("created_at", { ascending: true });
+    return throwIfError(data ?? [], error).map((row) => scheduledPostAccountFromRow(row as ScheduledPostAccountRow));
+  },
+
   async listByPost(scheduledPostId: string): Promise<ScheduledPostAccount[]> {
     const { data, error } = await getSupabaseAdmin()
       .from("scheduled_post_accounts")

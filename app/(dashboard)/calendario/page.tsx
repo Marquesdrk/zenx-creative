@@ -104,12 +104,16 @@ export default function CalendarioPage() {
       setPublications((await publicationRes.json()) as Publication[]);
     }
     if (scheduledRes.ok) {
-      const data = (await scheduledRes.json()) as { posts: ScheduledPost[]; accounts: ScheduledPostAccount[] };
-      setScheduledPosts(data.posts);
-      setScheduledPostAccounts(data.accounts);
+      const data = (await scheduledRes.json()) as {
+        posts?: ScheduledPost[];
+        accounts?: ScheduledPostAccount[];
+      };
+      setScheduledPosts(Array.isArray(data.posts) ? data.posts : []);
+      setScheduledPostAccounts(Array.isArray(data.accounts) ? data.accounts : []);
     }
     if (accountsRes.ok) {
-      setMetaAccounts((await accountsRes.json()) as PublicSocialAccount[]);
+      const data = (await accountsRes.json()) as PublicSocialAccount[];
+      setMetaAccounts(Array.isArray(data) ? data : []);
     }
   }, []);
 
@@ -385,7 +389,7 @@ export default function CalendarioPage() {
                   post.kind === "legacy" ? (
                     <div key={`legacy-${post.data.publication.id}`} className="flex items-center gap-3 rounded-lg border border-border bg-[#101014] p-3">
                       <div className="w-14">
-                        <VideoFrame profile={post.data.profile} title={post.data.item.manualOverrides.title} caption={post.data.item.manualOverrides.caption} contentUrl={post.data.item.renderedUrl ?? post.data.item.contentUrl} contentCrop={post.data.item.manualOverrides.crop} contentZoom={post.data.item.manualOverrides.zoom} contentFit={post.data.item.manualOverrides.fit} contentRotation={post.data.item.manualOverrides.rotation} watermarkPosition={post.data.item.manualOverrides.watermarkPosition} xStyleVideoFrame={post.data.item.manualOverrides.xStyleVideoFrame} />
+                        <VideoFrame profile={post.data.profile} title={post.data.item.manualOverrides.title} caption={post.data.item.manualOverrides.caption} contentUrl={post.data.item.renderedUrl ?? post.data.item.contentUrl} contentCrop={post.data.item.manualOverrides.crop} contentZoom={post.data.item.manualOverrides.zoom} contentFit={post.data.item.manualOverrides.fit} contentRotation={post.data.item.manualOverrides.rotation} reactOverlay={post.data.item.renderedUrl ? null : post.data.item.manualOverrides.reactOverlay} watermarkPosition={post.data.item.manualOverrides.watermarkPosition} xStyleVideoFrame={post.data.item.manualOverrides.xStyleVideoFrame} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 text-xs text-muted">

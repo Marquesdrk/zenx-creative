@@ -10,6 +10,52 @@ import { googleDriveTokensRepo, type GoogleDriveTokens } from "@/lib/server/goog
 // lib/server/google/drive-tokens-db.ts) — precisam sobreviver a cold starts na Vercel.
 const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
 const ROOT_FOLDER_NAME = "Zenx Creative - Agendados";
+const REACTION_ROOT_FOLDER_NAME = "Zenx Creative - Reações";
+
+type DriveTokenCache = {
+  loaded: boolean;
+  tokens: GoogleDriveTokens | null;
+  pending: Promise<GoogleDriveTokens | null> | null;
+};
+
+const globalForDrive = globalThis as typeof globalThis & { __zenxDriveTokenCache?: DriveTokenCache };
+
+function driveTokenCache() {
+  globalForDrive.__zenxDriveTokenCache ??= { loaded: false, tokens: null, pending: null };
+  return globalForDrive.__zenxDriveTokenCache;
+}
+
+function isTransientTokenReadError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /gateway timeout|\b50[234]\b|timeout|timed out|econnreset|etimedout|fetch failed/i.test(message);
+}
+
+async function loadDriveTokens() {
+  const cache = driveTokenCache();
+  if (cache.loaded) return cache.tokens;
+  if (cache.pending) return cache.pending;
+
+  const pending = (async () => {
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await googleDriveTokensRepo.get();
+      } catch (error) {
+        if (!isTransientTokenReadError(error) || attempt >= 2) throw error;
+        console.warn("[google-drive] Supabase timeout while reading Drive tokens; retrying", { attempt: attempt + 1 });
+        await new Promise((resolve) => setTimeout(resolve, 350 * 2 ** attempt));
+      }
+    }
+  })();
+  cache.pending = pending;
+  try {
+    const tokens = await pending;
+    cache.tokens = tokens;
+    cache.loaded = true;
+    return tokens;
+  } finally {
+    if (cache.pending === pending) cache.pending = null;
+  }
+}
 
 /** Credenciais de um app OAuth do Google Cloud (Desktop ou Web), com a Drive API habilitada.
  *  Ver .env.local.example para o passo a passo de como gerar essas três variáveis. */
@@ -26,11 +72,16 @@ async function getOAuthClient() {
     process.env.GOOGLE_CLIENT_SECRET,
     process.env.GOOGLE_REDIRECT_URI
   );
-  const tokens = await googleDriveTokensRepo.get();
+  const tokens = await loadDriveTokens();
   if (!tokens) return null;
   client.setCredentials(tokens);
   client.on("tokens", (refreshed) => {
-    void googleDriveTokensRepo.set(refreshed as GoogleDriveTokens);
+    const cache = driveTokenCache();
+    cache.tokens = { ...(cache.tokens ?? tokens), ...(refreshed as GoogleDriveTokens) };
+    cache.loaded = true;
+    void googleDriveTokensRepo.set(refreshed as GoogleDriveTokens).catch((error) => {
+      console.error("[google-drive] Failed to persist refreshed Drive tokens", error);
+    });
   });
   return client;
 }
@@ -43,7 +94,16 @@ export async function getGoogleAuthClient() {
 
 export async function isDriveConnected(): Promise<boolean> {
   if (!isDriveConfigured()) return false;
-  return (await googleDriveTokensRepo.get()) !== null;
+  const client = await getOAuthClient();
+  if (!client) return false;
+  try {
+    // Também força a renovação do access token quando ele expirou. Se o refresh token
+    // foi revogado/expirou, o Drive deve aparecer como desconectado para permitir reconexão.
+    const accessToken = await client.getAccessToken();
+    return Boolean(accessToken.token);
+  } catch {
+    return false;
+  }
 }
 
 export function getAuthUrl(): string {
@@ -69,10 +129,16 @@ export async function handleOAuthCallback(code: string): Promise<void> {
   );
   const { tokens } = await client.getToken(code);
   await googleDriveTokensRepo.set(tokens as GoogleDriveTokens);
+  const cache = driveTokenCache();
+  cache.tokens = tokens as GoogleDriveTokens;
+  cache.loaded = true;
 }
 
 export async function disconnectDrive(): Promise<void> {
   await googleDriveTokensRepo.clear();
+  const cache = driveTokenCache();
+  cache.tokens = null;
+  cache.loaded = true;
 }
 
 // Cache em memória do processo (mesma ideia do antigo cachedFolderId) — evita 2 buscas por
@@ -178,6 +244,11 @@ export async function listFilesInFolder(folderSegments: string[]): Promise<Drive
  *  listagem e upload nunca divergirem sobre onde procurar/gravar os vídeos de uma conta. */
 export function scheduledVideosFolderSegments(instagramUsername: string): string[] {
   return [ROOT_FOLDER_NAME, `@${instagramUsername.replace(/^@/, "")}`];
+}
+
+/** Pasta permanente das mídias reutilizáveis de reação de cada perfil. */
+export function reactionMediaFolderSegments(instagramUsername: string): string[] {
+  return [REACTION_ROOT_FOLDER_NAME, `@${instagramUsername.replace(/^@/, "")}`];
 }
 
 /** Garante que a pasta de agendados de uma conta já exista, sem subir nenhum arquivo — chamada

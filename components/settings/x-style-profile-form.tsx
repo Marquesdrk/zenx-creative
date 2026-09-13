@@ -12,16 +12,8 @@ export function XStyleProfileForm({
   profile: XStyleProfile;
   onChange: (profile: XStyleProfile) => void;
 }) {
-  const avatarInputRef = useRef<HTMLInputElement>(null);
   const templateInputRef = useRef<HTMLInputElement>(null);
   const [uploadingTemplate, setUploadingTemplate] = useState(false);
-
-  async function handleAvatarSelected(files: FileList | null) {
-    const file = files?.[0];
-    if (!file) return;
-    const url = await uploadFile(file);
-    onChange({ ...profile, avatarUrl: url });
-  }
 
   async function handleTemplateSelected(files: FileList | null) {
     const file = files?.[0];
@@ -123,33 +115,6 @@ export function XStyleProfileForm({
             </div>
             <p className="mt-1.5 text-[11px] text-muted">Use branco em templates de fundo escuro.</p>
           </div>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-4">
-        <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-border bg-background">
-          {profile.avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element -- object URL, not an optimizable static asset
-            <img src={profile.avatarUrl} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <span className="text-[10px] text-muted">Sem foto</span>
-          )}
-        </div>
-        <div>
-          <button
-            type="button"
-            onClick={() => avatarInputRef.current?.click()}
-            className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground hover:bg-card-hover"
-          >
-            Enviar foto de perfil
-          </button>
-          <input
-            ref={avatarInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(event) => handleAvatarSelected(event.target.files)}
-          />
         </div>
       </div>
 

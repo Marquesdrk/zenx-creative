@@ -1,8 +1,7 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Trash2 } from "lucide-react";
-import { uploadFile } from "@/lib/editor/upload-file";
 import type { ReactProfile, ReactionMedia } from "@/lib/editor/types";
 
 export function ReactProfileForm({
@@ -13,17 +12,40 @@ export function ReactProfileForm({
   onChange: (profile: ReactProfile) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   async function handleFilesSelected(files: FileList | null) {
     if (!files || files.length === 0) return;
-    const uploaded = await Promise.all(
-      Array.from(files).map(async (file) => ({
-        id: crypto.randomUUID(),
-        label: file.name,
-        url: await uploadFile(file),
-      }))
-    );
-    onChange({ ...profile, reactionMedia: [...profile.reactionMedia, ...uploaded] });
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const uploaded = await Promise.all(
+        Array.from(files).map(async (file) => ({
+          id: crypto.randomUUID(),
+          label: file.name,
+          ...(await uploadReactionToDrive(file)),
+        }))
+      );
+      onChange({ ...profile, reactionMedia: [...profile.reactionMedia, ...uploaded] });
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : "Não foi possível salvar os vídeos.");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function uploadReactionToDrive(file: File): Promise<{ url: string; driveFileId: string }> {
+    const formData = new FormData();
+    formData.append("file", file, file.name);
+    formData.append("profileHandle", profile.handle ?? profile.name);
+    const response = await fetch("/api/drive/reaction-media", { method: "POST", body: formData });
+    const payload = (await response.json().catch(() => null)) as { url?: string; fileId?: string; error?: string } | null;
+    if (!response.ok || !payload?.url || !payload.fileId) {
+      throw new Error(payload?.error || "Falha ao salvar a mídia no Google Drive.");
+    }
+    return { url: payload.url, driveFileId: payload.fileId };
   }
 
   function updateMedia(id: string, patch: Partial<ReactionMedia>) {
@@ -41,15 +63,28 @@ export function ReactProfileForm({
     <div>
       <h3 className="mb-1 text-sm font-semibold text-foreground">Mídias de reação do influencer</h3>
       <p className="mb-3 text-xs text-muted">
-        Enviadas uma vez aqui e reaproveitadas automaticamente em todo lote com este perfil, sem
-        precisar reimportar. O template React não usa marca d&apos;água.
+        Salvas no Google Drive em uma pasta própria do perfil e reaproveitadas automaticamente em
+        todo lote, sem precisar reimportar. O template React não usa marca d&apos;água.
       </p>
       <div className="grid grid-cols-5 gap-3">
         {profile.reactionMedia.map((media) => (
           <div key={media.id} className="flex flex-col gap-1.5">
             <div className="relative aspect-[9/8] overflow-hidden rounded-lg border border-border bg-black">
               {media.url && (
-                <video src={media.url} muted playsInline className="h-full w-full object-cover" />
+                <video
+                  src={media.url}
+                  muted
+                  autoPlay
+                  loop
+                  playsInline
+                  preload="metadata"
+                  onLoadedMetadata={(event) => {
+                    const video = event.currentTarget;
+                    if (Number.isFinite(video.duration)) video.currentTime = Math.min(1, video.duration / 2);
+                  }}
+                  onLoadedData={(event) => void event.currentTarget.play().catch(() => undefined)}
+                  className="h-full w-full object-cover"
+                />
               )}
               <button
                 type="button"
@@ -69,20 +104,22 @@ export function ReactProfileForm({
         ))}
         <button
           type="button"
+          disabled={uploading}
           onClick={() => fileInputRef.current?.click()}
-          className="flex aspect-[9/8] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-xs text-muted hover:border-accent hover:text-foreground"
+          className="flex aspect-[9/8] flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border text-xs text-muted hover:border-accent hover:text-foreground disabled:cursor-wait disabled:opacity-50"
         >
-          + Adicionar
+          {uploading ? "Salvando…" : "+ Adicionar"}
         </button>
       </div>
       <input
         ref={fileInputRef}
         type="file"
         multiple
-        accept="video/*,image/*"
+        accept="video/*"
         className="hidden"
         onChange={(event) => handleFilesSelected(event.target.files)}
       />
+      {uploadError && <p className="mt-2 text-xs text-red-300">{uploadError}</p>}
     </div>
   );
 }

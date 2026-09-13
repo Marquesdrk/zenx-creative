@@ -81,7 +81,7 @@ export function createBlankProfile(engine: Engine, templateId: string): Profile 
   const id = crypto.randomUUID();
   switch (engine) {
     case "REACT":
-      return { id, name: "Novo perfil React", engine, templateId, reactionMedia: [] };
+      return { id, name: "Novo perfil React", engine, templateId, handle: "@novoperfil", profilePictureUrl: null, reactionMedia: [] };
     case "X_STYLE":
       return {
         id,
@@ -89,6 +89,7 @@ export function createBlankProfile(engine: Engine, templateId: string): Profile 
         engine,
         templateId,
         handle: "@novoperfil",
+        profilePictureUrl: null,
         avatarUrl: null,
         verified: false,
         editorialTone: "Tom neutro",
@@ -102,6 +103,8 @@ export function createBlankProfile(engine: Engine, templateId: string): Profile 
         name: "Novo perfil UGC",
         engine,
         templateId,
+        handle: "@novoperfil",
+        profilePictureUrl: null,
         watermarkImageUrl: null,
       };
   }

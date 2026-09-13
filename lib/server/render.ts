@@ -4,8 +4,10 @@ import ffprobeStatic from "ffprobe-static";
 import ffmpeg from "fluent-ffmpeg";
 import * as PImage from "pureimage";
 import { get } from "@vercel/blob";
+import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { Readable } from "node:stream";
 import os from "node:os";
 import path from "node:path";
 import { effectiveDimensions, fitCenteredRect, normalizedCropToPixels } from "@/lib/editor/crop-geometry";
@@ -13,6 +15,7 @@ import { MOCK_PROFILES } from "@/lib/editor/mock-profiles";
 import { resolveXStyleLayout, type BatchItem, type Profile } from "@/lib/editor/types";
 import { emojiAssetCode, isEmojiSegment, splitGraphemes, whatsappEmojiFilename } from "@/lib/emoji/whatsapp";
 import { generatedFileUrl, generatedFolder, publicUrlToPath, sanitizeFilename } from "@/lib/server/public-files";
+import { listFilesInFolder, reactionMediaFolderSegments, streamDriveFile } from "@/lib/server/google-drive";
 
 if (ffmpegStatic) ffmpeg.setFfmpegPath(ffmpegStatic);
 ffmpeg.setFfprobePath((ffprobeStatic as { path: string }).path);
@@ -27,17 +30,59 @@ const ROTATE_FILTERS: Record<number, string[]> = {
   270: ["transpose=2"],
 };
 
-// Sem isso, cada processo do libx264 tenta usar TODOS os cores da máquina — com vários itens
-// renderizando em paralelo (MAX_PARALLEL_RENDERS no editor, hoje 3), isso satura o PC inteiro
-// em vez de só a CPU disponível pro processo. Divide ~75% dos cores entre os renders
-// simultâneos esperados, deixando o resto livre pro sistema continuar responsivo.
-const ASSUMED_CONCURRENT_RENDERS = 3;
-const ENCODE_THREADS = Math.max(1, Math.floor((os.cpus().length * 0.75) / ASSUMED_CONCURRENT_RENDERS));
+// O render tem duas passagens (loop da reação + composição final). Limita cada processo
+// para a exportação não ocupar todos os núcleos e deixar o restante do computador sem resposta.
+const ENCODE_THREADS = Math.max(1, Math.min(2, Math.floor(os.cpus().length * 0.5)));
+const PING_PONG_CACHE_DIR = path.join(os.tmpdir(), "zenx-reaction-cache");
+const pingPongReactionCache = new Map<string, Promise<string>>();
 
-const TEXT_FONT_PATH = path.join(process.cwd(), "assets", "fonts", "arialbd.ttf");
+const FALLBACK_TEXT_FONT_PATH = path.join(process.cwd(), "assets", "fonts", "arialbd.ttf");
+const RENDER_FONT_PATHS = {
+  impact: "C:\\Windows\\Fonts\\impact.ttf",
+  arial: FALLBACK_TEXT_FONT_PATH,
+  condensed: "C:\\Windows\\Fonts\\bahnschrift.ttf",
+  serif: "C:\\Windows\\Fonts\\georgia.ttf",
+  clean: "C:\\Windows\\Fonts\\arial.ttf",
+} as const;
+const RENDER_FONT_FAMILIES = {
+  impact: "ZenxImpact",
+  arial: "ZenxSans",
+  condensed: "ZenxCondensed",
+  serif: "ZenxSerif",
+  clean: "ZenxClean",
+} as const;
 const WHATSAPP_EMOJI_DIR = path.join(process.cwd(), "public", "whatsapp-emoji", "png");
 let textFontPromise: Promise<void> | null = null;
 const emojiImageCache = new Map<string, Promise<PImage.Bitmap | null>>();
+
+function hexColorToRgba(hex: string) {
+  const normalized = hex.replace("#", "");
+  const rgb = Number.parseInt(normalized, 16);
+  return ((rgb << 8) | 0xff) >>> 0;
+}
+
+function drawTornBanner(
+  ctx: ReturnType<ReturnType<typeof PImage.make>["getContext"]>,
+  y: number,
+  height: number,
+  inset = 0
+) {
+  const left = inset;
+  const right = OUTPUT_WIDTH - inset;
+  const top = y + inset;
+  const bottom = y + height - inset;
+  ctx.beginPath();
+  ctx.moveTo(left, top + 18);
+  for (let x = left; x <= right; x += 72) {
+    ctx.lineTo(x, top + (Math.round(x / 72) % 2 === 0 ? 0 : 10));
+  }
+  ctx.lineTo(right, bottom - 18);
+  for (let x = right; x >= left; x -= 72) {
+    ctx.lineTo(x, bottom - (Math.round(x / 72) % 2 === 0 ? 0 : 10));
+  }
+  ctx.closePath();
+  ctx.fill();
+}
 
 function isRemoteUrl(url: string) {
   return /^https?:\/\//i.test(url);
@@ -80,6 +125,18 @@ async function materializeDataUrl(url: string) {
 
 async function materializeMediaUrl(url: string) {
   if (isDataUrl(url)) return materializeDataUrl(url);
+
+  const driveMediaMatch = url.match(/^\/api\/drive\/(?:media|stream)\/([^/?#]+)/i);
+  if (driveMediaMatch) {
+    const driveFile = await streamDriveFile(decodeURIComponent(driveMediaMatch[1]));
+    const uploadDir = generatedFolder("uploads");
+    await mkdir(uploadDir, { recursive: true });
+    const filename = sanitizeFilename(`drive-${crypto.randomUUID()}${extensionFromMimeType(driveFile.mimeType)}`);
+    const filePath = path.join(uploadDir, filename);
+    const body = await new Response(Readable.toWeb(driveFile.stream) as unknown as ReadableStream).arrayBuffer();
+    await writeFile(filePath, Buffer.from(body));
+    return { path: filePath, cleanup: true };
+  }
 
   if (!isRemoteUrl(url)) {
     const filePath = publicUrlToPath(url);
@@ -176,6 +233,7 @@ function buildContentFilters(
 function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: string[], outputPath: string, item: BatchItem) {
   return new Promise<void>((resolve, reject) => {
     const command = ffmpeg();
+    const stderr: string[] = [];
     inputs.forEach(({ path: inputPath, options }) => {
       command.input(inputPath);
       if (options) command.inputOptions(options);
@@ -186,6 +244,8 @@ function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: s
       outputOptions.push("-map", "0:a?", "-af", `volume=${item.manualOverrides.volume}`);
     }
     outputOptions.push(
+      "-filter_complex_threads",
+      "1",
       "-c:v",
       "libx264",
       "-preset",
@@ -206,10 +266,92 @@ function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: s
     command
       .complexFilter(filterGraph)
       .outputOptions(outputOptions)
-      .on("error", (err) => reject(err))
+      .on("stderr", (line) => stderr.push(line))
+      .on("error", (err) => {
+        const detail = stderr.slice(-8).join(" ").trim();
+        console.error("[render] FFmpeg falhou", { outputPath, message: err.message, detail });
+        reject(new Error(detail ? `${err.message} — ${detail}` : err.message));
+      })
       .on("end", () => resolve())
       .save(outputPath);
   });
+}
+
+/** Cria uma sequência finita frente + trás para repetir a reação sem o salto
+ * brusco do último quadro de volta para o primeiro. */
+function createPingPongReaction(inputPath: string, outputPath: string, targetWidth: number, targetHeight: number) {
+  return new Promise<void>((resolve, reject) => {
+    const command = ffmpeg(inputPath);
+    const stderr: string[] = [];
+    command
+      .complexFilter([
+        `[0:v]scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,crop=${targetWidth}:${targetHeight},fps=30,setsar=1,split=2[front][back]`,
+        "[front]setpts=PTS-STARTPTS[forward]",
+        "[back]reverse,setpts=PTS-STARTPTS[backward]",
+        "[forward][backward]concat=n=2:v=1:a=0[outv]",
+      ])
+      .outputOptions([
+        "-map",
+        "[outv]",
+        "-filter_complex_threads",
+        "1",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "ultrafast",
+        "-crf",
+        "28",
+        "-threads",
+        String(ENCODE_THREADS),
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+      ])
+      .on("stderr", (line) => stderr.push(line))
+      .on("error", (error) => {
+        const detail = stderr.slice(-8).join(" ").trim();
+        reject(new Error(detail ? `${error.message} — ${detail}` : error.message));
+      })
+      .on("end", () => resolve())
+      .save(outputPath);
+  });
+}
+
+async function getPingPongReactionPath(
+  inputPath: string,
+  stableMediaId: string,
+  targetWidth: number,
+  targetHeight: number
+) {
+  const file = await stat(inputPath);
+  const cacheKey = createHash("sha256")
+    .update(`${stableMediaId}:${file.size}:${targetWidth}x${targetHeight}`)
+    .digest("hex");
+  const cachedPath = path.join(PING_PONG_CACHE_DIR, `${cacheKey}.mp4`);
+  if (existsSync(cachedPath)) return cachedPath;
+
+  const existing = pingPongReactionCache.get(cacheKey);
+  if (existing) return existing;
+
+  const pending = (async () => {
+    await mkdir(PING_PONG_CACHE_DIR, { recursive: true });
+    try {
+      await createPingPongReaction(inputPath, cachedPath, targetWidth, targetHeight);
+      return cachedPath;
+    } catch (error) {
+      await rm(cachedPath, { force: true });
+      throw error;
+    }
+  })();
+  pingPongReactionCache.set(cacheKey, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    pingPongReactionCache.delete(cacheKey);
+    throw error;
+  }
 }
 
 function contentInputOptions(item: BatchItem): string[] {
@@ -275,31 +417,155 @@ async function renderReact(
   outputPath: string
 ) {
   if (profile.engine !== "REACT") throw new Error("Perfil não é REACT");
-  const reactionUrl = profile.reactionMedia.find((m) => m.id === item.manualOverrides.reactionMediaId)?.url ?? null;
+  const selectedReaction = profile.reactionMedia.find(
+    (media) => media.id === item.manualOverrides.reactionMediaId && (media.url || media.driveFileId)
+  );
+  // Lotes antigos podem ter sido criados antes da seleção da reação ser persistida.
+  // Nesse caso, usar a primeira mídia válida do perfil mantém a exportação funcionando.
+  const fallbackReaction = profile.reactionMedia.find((media) => media.url || media.driveFileId);
+  let reactionUrl =
+    selectedReaction?.url ??
+    (selectedReaction?.driveFileId ? `/api/drive/media/${selectedReaction.driveFileId}` : null) ??
+    fallbackReaction?.url ??
+    (fallbackReaction?.driveFileId ? `/api/drive/media/${fallbackReaction.driveFileId}` : null);
+  // Perfis gravados antes da persistência das mídias podem chegar à exportação sem o array
+  // preenchido. O Drive continua sendo a fonte permanente: recupera a primeira reação da pasta.
+  if (!reactionUrl && profile.handle) {
+    const driveReaction = (await listFilesInFolder(reactionMediaFolderSegments(profile.handle)))[0];
+    if (driveReaction?.id) reactionUrl = `/api/drive/media/${driveReaction.id}`;
+  }
   const reactionMedia = reactionUrl ? await materializeMediaUrl(reactionUrl) : null;
   if (!reactionMedia) {
-    await renderTransformOnly(item, source, contentPath, outputPath);
-    return;
+    throw new Error(
+        `Perfil React "${profile.name}" não possui uma mídia de reação válida. ` +
+        "Cadastre pelo menos um vídeo de reação nas configurações antes de exportar."
+    );
   }
-  const topHeight = Math.round(OUTPUT_HEIGHT * 0.36);
+  // Keep every intermediate and final stream on even dimensions. libx264 with
+  // yuv420p rejects odd heights, and rounding 36% directly produced 691px.
+  const topHeight = Math.round((OUTPUT_HEIGHT * 0.36) / 2) * 2;
   const bottomHeight = OUTPUT_HEIGHT - topHeight;
   const contentFilters = buildContentFilters(item, source, OUTPUT_WIDTH, bottomHeight);
+  const overlay = item.manualOverrides.reactOverlay;
+  let overlayPath: string | null = null;
+  let reactionInputPath = reactionMedia.path;
+  let pingPongReaction = false;
+  if (item.manualOverrides.reactionLoopMode === "pingpong") {
+    reactionInputPath = await getPingPongReactionPath(
+      reactionMedia.path,
+      selectedReaction?.driveFileId ?? selectedReaction?.id ?? reactionUrl ?? reactionMedia.path,
+      OUTPUT_WIDTH,
+      topHeight
+    );
+    pingPongReaction = true;
+  }
+  if (overlay?.enabled && overlay.text.trim()) {
+    await ensureTextFont();
+    const image = PImage.make(OUTPUT_WIDTH, OUTPUT_HEIGHT);
+    const ctx = image.getContext("2d");
+    // PureImage cria o bitmap preto e opaco por padrão. Sem limpar, a PNG da tarja
+    // cobria os dois vídeos com preto quando era sobreposta no quadro final.
+    ctx.clearRect(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
+    // The React composition has one fixed seam: the tarja starts exactly
+    // where the reaction panel ends. Keep this identical to the editor
+    // preview instead of allowing independent top/center/bottom placement.
+    const bannerY = topHeight;
+    const fontSize = Math.max(24, Math.min(140, overlay.fontSize ?? 66));
+    const lineHeight = Math.round(fontSize * 1.12);
+    // Match the preview's 10px vertical padding at a 540px-wide editor frame,
+    // scaled to the 1080px render canvas. The banner grows with its text instead
+    // of reserving a fixed 240px for even a one-line title.
+    const verticalPadding = Math.round(1080 * (10 / 540));
+    const maxChars = Math.max(10, Math.floor((OUTPUT_WIDTH - 120) / (fontSize * 0.52)));
+    const lineCount = Math.max(1, wrapText(overlay.text, maxChars, 3).length);
+    const bannerHeight = verticalPadding * 2 + lineCount * lineHeight;
+    const overlayColors: Record<string, string> = {
+      red: "#ef2029",
+      orange: "#ff7a00",
+      purple: "#7c3aed",
+      cyan: "#06b6d4",
+      pink: "#ec4899",
+      black: "#050505",
+      white: "#f5f5f5",
+    };
+    const overlayAccents: Record<string, string> = {
+      yellow: "#facc15",
+      white: "#ffffff",
+      black: "#111111",
+      cyan: "#22d3ee",
+      pink: "#f472b6",
+    };
+    const customBackground = /^#[0-9a-f]{6}$/i.test(overlay.customBackground ?? "")
+      ? overlay.customBackground
+      : overlayColors.red;
+    const backgroundColor = overlay.background === "custom"
+      ? customBackground
+      : overlayColors[overlay.background] ?? overlayColors.red;
+    const accentColor = overlayAccents[overlay.accent] ?? overlayAccents.yellow;
+    if (overlay.template === "torn") {
+      ctx.fillStyle = "#f4f1e8";
+      drawTornBanner(ctx, bannerY, bannerHeight);
+    }
+    if (overlay.template === "gradient") {
+      const gradient = ctx.createLinearGradient(0, bannerY, OUTPUT_WIDTH, bannerY + bannerHeight);
+      gradient.addColorStop(0, hexColorToRgba(backgroundColor));
+      gradient.addColorStop(1, hexColorToRgba(accentColor));
+      ctx.fillStyle = gradient;
+    } else {
+      ctx.fillStyle = backgroundColor;
+    }
+    if (overlay.template === "torn") drawTornBanner(ctx, bannerY, bannerHeight, 6);
+    else ctx.fillRect(0, bannerY, OUTPUT_WIDTH, bannerHeight);
+    await drawTextBlock(ctx, overlay.text, {
+      x: 60,
+      y: bannerY + verticalPadding,
+      fontSize,
+      maxWidth: OUTPUT_WIDTH - 120,
+      maxLines: 3,
+      lineHeight,
+      weight: "bold",
+      align: "center",
+      color: overlay.textColor === "white" ? "white" : "black",
+      fontFamily: RENDER_FONT_FAMILIES[overlay.font] ?? RENDER_FONT_FAMILIES.impact,
+      ...(overlay.textOutline > 0
+        ? {
+            outlineColor: "#000000",
+            outlineWidth: Math.round((Math.min(100, Math.max(0, overlay.textOutline)) / 100) * 14),
+          }
+        : {}),
+    });
+    overlayPath = outputPath.replace(/\.mp4$/i, "-react-overlay.png");
+    await PImage.encodePNGToStream(image, createWriteStream(overlayPath));
+  }
   const filterGraph = [
-    `[1:v]scale=${OUTPUT_WIDTH}:${topHeight}:force_original_aspect_ratio=increase,crop=${OUTPUT_WIDTH}:${topHeight}[top]`,
-    `[0:v]${contentFilters.join(",")}[bottom]`,
-    `[top][bottom]vstack=inputs=2[outv]`,
+    pingPongReaction
+      ? `[1:v]setsar=1,fps=30,setpts=PTS-STARTPTS[top]`
+      : `[1:v]scale=${OUTPUT_WIDTH}:${topHeight}:force_original_aspect_ratio=increase,crop=${OUTPUT_WIDTH}:${topHeight},setsar=1,fps=30,setpts=PTS-STARTPTS[top]`,
+    `[0:v]${contentFilters.join(",")},setsar=1,setpts=PTS-STARTPTS[bottom]`,
+    `[top][bottom]vstack=inputs=2[base]`,
+    ...(overlayPath
+      ? [
+          `[2:v]format=rgba,setsar=1,fps=30[overlay]`,
+          `[base][overlay]overlay=0:0:shortest=1[composed]`,
+          `[composed]scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,pad=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[outv]`,
+        ]
+      : [
+          `[base]scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,pad=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[outv]`,
+        ]),
   ];
   try {
     await run(
       [
         { path: contentPath, options: contentInputOptions(item) },
-        { path: reactionMedia.path, options: ["-stream_loop", "-1"] },
+        { path: reactionInputPath, options: ["-stream_loop", "-1"] },
+        ...(overlayPath ? [{ path: overlayPath, options: ["-loop", "1"] }] : []),
       ],
       filterGraph,
       outputPath,
       item
     );
   } finally {
+    if (overlayPath) await rm(overlayPath, { force: true });
     await cleanupMaterializedMedia(reactionMedia);
   }
 }
@@ -375,10 +641,26 @@ async function loadEmojiImage(segment: string) {
 }
 
 function measureRichText(ctx: ReturnType<ReturnType<typeof PImage.make>["getContext"]>, text: string, emojiSize: number) {
-  return splitGraphemes(text).reduce((width, segment) => {
-    if (isEmojiSegment(segment)) return width + emojiSize;
-    return width + ctx.measureText(segment).width;
-  }, 0);
+  let width = 0;
+  let textRun = "";
+
+  const flushTextRun = () => {
+    if (!textRun) return;
+    width += ctx.measureText(textRun).width;
+    textRun = "";
+  };
+
+  for (const segment of splitGraphemes(text)) {
+    if (isEmojiSegment(segment)) {
+      flushTextRun();
+      width += emojiSize;
+    } else {
+      textRun += segment;
+    }
+  }
+
+  flushTextRun();
+  return width;
 }
 
 async function drawRichText(
@@ -390,9 +672,18 @@ async function drawRichText(
 ) {
   const emojiSize = Math.round(fontSize * 1.05);
   let cursorX = x;
+  let textRun = "";
+
+  const flushTextRun = () => {
+    if (!textRun) return;
+    ctx.fillText(textRun, cursorX, y);
+    cursorX += ctx.measureText(textRun).width;
+    textRun = "";
+  };
 
   for (const segment of splitGraphemes(text)) {
     if (isEmojiSegment(segment)) {
+      flushTextRun();
       const emoji = await loadEmojiImage(segment);
       if (emoji) {
         ctx.drawImage(emoji, 0, 0, emoji.width, emoji.height, cursorX, y - Math.round(fontSize * 0.05), emojiSize, emojiSize);
@@ -403,14 +694,22 @@ async function drawRichText(
       continue;
     }
 
-    ctx.fillText(segment, cursorX, y);
-    cursorX += ctx.measureText(segment).width;
+    textRun += segment;
   }
+
+  flushTextRun();
 }
 
 async function ensureTextFont() {
   if (!textFontPromise) {
-    textFontPromise = PImage.registerFont(TEXT_FONT_PATH, "ZenxSans").load();
+    textFontPromise = (async () => {
+      const registrations = Object.entries(RENDER_FONT_PATHS).map(async ([font, fontPath]) => {
+        if (existsSync(fontPath)) {
+          await PImage.registerFont(fontPath, RENDER_FONT_FAMILIES[font as keyof typeof RENDER_FONT_FAMILIES]).load();
+        }
+      });
+      await Promise.all(registrations);
+    })();
   }
   await textFontPromise;
 }
@@ -428,21 +727,42 @@ async function drawTextBlock(
     weight?: "bold";
     align?: "left" | "center";
     color?: "white" | "black";
+    fontFamily?: string;
+    outlineColor?: string;
+    outlineWidth?: number;
   }
 ): Promise<void> {
   const maxChars = Math.max(10, Math.floor(options.maxWidth / (options.fontSize * 0.52)));
   const lines = wrapText(text, maxChars, options.maxLines);
   if (lines.length === 0) return;
 
-  ctx.fillStyle = options.color ?? "black";
-  ctx.font = `${options.fontSize}pt ZenxSans`;
   ctx.textBaseline = "top";
   for (const [index, line] of lines.entries()) {
+    ctx.font = `${options.fontSize}pt ${options.fontFamily ?? "ZenxSans"}`;
     const lineWidth = measureRichText(ctx, line, Math.round(options.fontSize * 1.05));
     const x =
       options.align === "center"
         ? options.x + Math.max(0, (options.maxWidth - lineWidth) / 2)
         : options.x;
+    if (options.outlineColor) {
+      // PureImage's strokeText expands glyph paths with a path projector that can
+      // collapse on duplicate points (notably in Impact/condensed glyphs), corrupting
+      // the title. Build the outline from filled glyph copies instead.
+      const radius = Math.max(0, options.outlineWidth ?? 0) / 2;
+      if (radius > 0) {
+        ctx.fillStyle = options.outlineColor;
+        const steps = Math.max(12, Math.ceil(radius * 4));
+        for (let step = 0; step < steps; step += 1) {
+          const angle = (step / steps) * Math.PI * 2;
+          ctx.fillText(
+            line,
+            x + Math.cos(angle) * radius,
+            options.y + index * options.lineHeight + Math.sin(angle) * radius
+          );
+        }
+      }
+    }
+    ctx.fillStyle = options.color ?? "black";
     await drawRichText(ctx, line, x, options.y + index * options.lineHeight, options.fontSize);
   }
 }

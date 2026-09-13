@@ -41,12 +41,21 @@ export function VideoCard({
             contentZoom={item.manualOverrides.zoom}
             contentFit={item.manualOverrides.fit}
             contentRotation={item.manualOverrides.rotation}
+            reactOverlay={item.manualOverrides.reactOverlay}
+            reactionLoopMode={item.manualOverrides.reactionLoopMode ?? "repeat"}
             watermarkPosition={item.manualOverrides.watermarkPosition}
             xStyleVideoFrame={item.manualOverrides.xStyleVideoFrame}
             reactionMediaUrl={
               profile.engine === "REACT"
                 ? (profile.reactionMedia.find((r) => r.id === item.manualOverrides.reactionMediaId)
-                    ?.url ?? null)
+                    ?.url ??
+                    (profile.reactionMedia.find((r) => r.id === item.manualOverrides.reactionMediaId)?.driveFileId
+                      ? `/api/drive/media/${profile.reactionMedia.find((r) => r.id === item.manualOverrides.reactionMediaId)?.driveFileId}`
+                      : null) ??
+                    profile.reactionMedia.find((r) => r.url)?.url ??
+                    (profile.reactionMedia.find((r) => r.driveFileId)?.driveFileId
+                      ? `/api/drive/media/${profile.reactionMedia.find((r) => r.driveFileId)?.driveFileId}`
+                      : null))
                 : null
             }
           />

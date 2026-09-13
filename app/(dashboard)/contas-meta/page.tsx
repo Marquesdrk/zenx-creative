@@ -46,6 +46,29 @@ function initials(name: string) {
     .join("");
 }
 
+function BrandAvatar({ pictureUrl, name }: { pictureUrl: string | null; name: string }) {
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const showFallback = !pictureUrl || failedUrl === pictureUrl;
+
+  if (showFallback) {
+    return (
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-sm font-bold text-white">
+        {initials(name)}
+      </span>
+    );
+  }
+
+  return (
+    // eslint-disable-next-line @next/next/no-img-element -- avatar remoto da Meta, fora do domínio de imagens do Next
+    <img
+      src={pictureUrl}
+      alt=""
+      onError={() => setFailedUrl(pictureUrl)}
+      className="h-11 w-11 shrink-0 rounded-full object-cover"
+    />
+  );
+}
+
 function groupAccounts(accounts: PublicSocialAccount[]) {
   const map = new Map<string, BrandAccounts>();
   for (const account of accounts) {
@@ -233,26 +256,15 @@ function ContasMetaContent() {
               </div>
             ) : (
               brandRows.map((brand) => (
-                <div key={brand.key} className="grid grid-cols-[minmax(160px,1fr)_minmax(0,2.2fr)_auto] items-center gap-4 border-b border-border px-4 py-5 last:border-b-0">
-                  <div className="flex min-w-0 items-center gap-3">
-                    {brand.profilePictureUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- avatar remoto da Meta, fora do domínio de imagens do Next
-                      <img
-                        src={brand.profilePictureUrl}
-                        alt=""
-                        className="h-11 w-11 shrink-0 rounded-full object-cover"
-                      />
-                    ) : (
-                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-accent to-accent-2 text-sm font-bold text-white">
-                        {initials(brand.name)}
-                      </span>
-                    )}
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">{brand.name}</p>
-                      <p className="truncate text-xs text-muted">{brand.handle}</p>
-                      {brand.key === brandRows[0]?.key && <span className="mt-2 inline-flex rounded-full bg-accent/20 px-2 py-1 text-[11px] font-semibold text-[#B8B0FF]">Marca principal</span>}
+                  <div key={brand.key} className="grid grid-cols-[minmax(160px,1fr)_minmax(0,2.2fr)_auto] items-center gap-4 border-b border-border px-4 py-5 last:border-b-0">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <BrandAvatar pictureUrl={brand.profilePictureUrl} name={brand.name} />
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-semibold text-foreground">{brand.name}</p>
+                        <p className="truncate text-xs text-muted">{brand.handle}</p>
+                        {brand.key === brandRows[0]?.key && <span className="mt-2 inline-flex rounded-full bg-accent/20 px-2 py-1 text-[11px] font-semibold text-[#B8B0FF]">Marca principal</span>}
+                      </div>
                     </div>
-                  </div>
                   <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-3">
                     <AccountSlot platform="INSTAGRAM" account={brand.instagram} />
                     <AccountSlot platform="TIKTOK" />

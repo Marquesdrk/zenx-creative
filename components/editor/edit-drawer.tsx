@@ -9,6 +9,7 @@ import { VideoFrame } from "./video-frame";
 import { WatermarkCanvas } from "./watermark-canvas";
 import {
   ASPECT_MODE_LABELS,
+  DEFAULT_REACT_OVERLAY,
   FULL_FRAME_CROP,
   resolveXStyleLayout,
   type AspectMode,
@@ -35,6 +36,16 @@ function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+function hexToRgb(hex: string) {
+  const value = hex.replace("#", "").padEnd(6, "0").slice(0, 6);
+  const numeric = Number.parseInt(value, 16);
+  return { r: (numeric >> 16) & 255, g: (numeric >> 8) & 255, b: numeric & 255 };
+}
+
+function rgbToHex(r: number, g: number, b: number) {
+  return `#${[r, g, b].map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0")).join("")}`;
 }
 
 function SectionLabel({ children }: { children: React.ReactNode }) {
@@ -67,6 +78,27 @@ export function EditDrawer({
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const trimVideoRef = useRef<HTMLVideoElement>(null);
   const overrides = draft.manualOverrides;
+  const reactOverlay = { ...DEFAULT_REACT_OVERLAY, ...(overrides.reactOverlay ?? {}) };
+  const customRgb = hexToRgb(reactOverlay.customBackground);
+  const updateCustomRgb = (channel: "r" | "g" | "b", value: number) => {
+    const nextRgb = { ...customRgb, [channel]: Math.max(0, Math.min(255, value || 0)) };
+    updateOverrides({
+      reactOverlay: {
+        ...reactOverlay,
+        background: "custom",
+        customBackground: rgbToHex(nextRgb.r, nextRgb.g, nextRgb.b),
+      },
+    });
+  };
+  const moveCrop = (dx: number, dy: number) => {
+    updateOverrides({
+      crop: {
+        ...overrides.crop,
+        x: clamp(overrides.crop.x + dx, 0, Math.max(0, 1 - overrides.crop.width)),
+        y: clamp(overrides.crop.y + dy, 0, Math.max(0, 1 - overrides.crop.height)),
+      },
+    });
+  };
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -211,7 +243,15 @@ export function EditDrawer({
                 </div>
               </div>
             ) : (
-              <div className="mx-auto w-full max-w-[280px]">
+              <div className="mx-auto w-full max-w-[300px]">
+                <div className="mb-2 flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-muted">Prévia final</p>
+                  {profile.engine === "REACT" && (
+                    <span className="rounded-full border border-accent/30 bg-accent/10 px-2 py-0.5 text-[10px] text-accent">
+                      Reação + conteúdo
+                    </span>
+                  )}
+                </div>
                 {profile.engine === "UGC" ? (
                   <WatermarkCanvas
                     profile={profile}
@@ -239,9 +279,17 @@ export function EditDrawer({
                     reactionMediaUrl={
                       profile.engine === "REACT"
                         ? (profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.url ??
-                          null)
+                          (profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.driveFileId
+                            ? `/api/drive/media/${profile.reactionMedia.find((r) => r.id === overrides.reactionMediaId)?.driveFileId}`
+                            : null) ??
+                          profile.reactionMedia.find((r) => r.url)?.url ??
+                          (profile.reactionMedia.find((r) => r.driveFileId)?.driveFileId
+                            ? `/api/drive/media/${profile.reactionMedia.find((r) => r.driveFileId)?.driveFileId}`
+                            : null))
                         : null
                     }
+                    reactOverlay={reactOverlay}
+                    reactionLoopMode={overrides.reactionLoopMode ?? "repeat"}
                   />
                 )}
               </div>
@@ -343,14 +391,17 @@ export function EditDrawer({
                             <video
                               src={media.url}
                               muted
+                              autoPlay
+                              loop
                               playsInline
                               preload="metadata"
                               onLoadedMetadata={(event) => {
                                 const video = event.currentTarget;
                                 if (Number.isFinite(video.duration)) {
-                                  video.currentTime = Math.min(0.1, video.duration / 2);
+                                  video.currentTime = Math.min(1, video.duration / 2);
                                 }
                               }}
+                              onLoadedData={(event) => void event.currentTarget.play().catch(() => undefined)}
                               className="h-full w-full object-cover"
                             />
                           )}
@@ -359,6 +410,25 @@ export function EditDrawer({
                       </button>
                     ))}
                   </div>
+                  <label className="mt-3 block text-xs text-muted">
+                    Repetição da reação
+                    <select
+                      aria-label="Modo de repetição da reação"
+                      value={overrides.reactionLoopMode ?? "repeat"}
+                      onChange={(event) =>
+                        updateOverrides({
+                          reactionLoopMode: event.target.value as typeof overrides.reactionLoopMode,
+                        })
+                      }
+                      className="mt-1 h-8 w-full rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                    >
+                      <option value="repeat">Loop normal (reinicia do começo)</option>
+                      <option value="pingpong">Vai e volta (frente e trás)</option>
+                    </select>
+                    <span className="mt-1 block text-[11px] text-muted">
+                      No modo vai e volta, a reação retorna do último quadro ao primeiro antes de repetir.
+                    </span>
+                  </label>
                 </div>
               )}
 
@@ -372,6 +442,170 @@ export function EditDrawer({
                     onChange={(event) => updateOverrides({ title: event.target.value })}
                     className="w-full rounded-lg border border-border bg-card p-2 text-sm text-foreground"
                   />
+                </div>
+              )}
+
+              {profile.engine === "REACT" && (
+                <div className="space-y-3 rounded-lg border border-border bg-card/40 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <SectionLabel>Tarja e texto de destaque</SectionLabel>
+                    <label className="flex items-center gap-2 text-xs text-muted">
+                      <input
+                        type="checkbox"
+                        checked={reactOverlay.enabled}
+                        onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, enabled: event.target.checked } })}
+                        className="accent-accent"
+                      />
+                      Ativar
+                    </label>
+                  </div>
+                  <textarea
+                    aria-label="Texto da tarja do React"
+                    value={reactOverlay.text}
+                    onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, text: event.target.value } })}
+                    placeholder="Ex.: O que você acha disso?"
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-card p-2 text-sm text-foreground"
+                  />
+                  <label className="block text-xs text-muted">
+                    Estilo visual
+                    <select
+                      aria-label="Estilo visual da tarja"
+                      value={reactOverlay.template}
+                      onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, template: event.target.value as typeof reactOverlay.template } })}
+                      className="mt-1 h-8 w-full rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                    >
+                      <option value="solid">Faixa vibrante</option>
+                      <option value="gradient">Degradê chamativo</option>
+                      <option value="neon">Neon com brilho</option>
+                      <option value="torn">Papel rasgado</option>
+                    </select>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-xs text-muted">
+                      Cor da tarja
+                      <select
+                        aria-label="Cor da tarja"
+                        value={reactOverlay.background}
+                        onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, background: event.target.value as typeof reactOverlay.background } })}
+                        className="mt-1 h-8 w-full rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                      >
+                        <option value="red">Vermelha</option>
+                        <option value="orange">Laranja</option>
+                        <option value="purple">Roxa</option>
+                        <option value="cyan">Ciano</option>
+                        <option value="pink">Rosa</option>
+                        <option value="black">Preta</option>
+                        <option value="white">Branca</option>
+                        <option value="custom">Personalizada (RGB)</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-muted">
+                      Cor de destaque
+                      <select
+                        aria-label="Cor de destaque da tarja"
+                        value={reactOverlay.accent}
+                        onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, accent: event.target.value as typeof reactOverlay.accent } })}
+                        className="mt-1 h-8 w-full rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                      >
+                        <option value="yellow">Amarelo</option>
+                        <option value="white">Branco</option>
+                        <option value="black">Preto</option>
+                        <option value="cyan">Ciano</option>
+                        <option value="pink">Rosa</option>
+                        </select>
+                    </label>
+                    <label className="text-xs text-muted">
+                      Fonte do título
+                      <select
+                        aria-label="Fonte do título da tarja"
+                        value={reactOverlay.font}
+                        onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, font: event.target.value as typeof reactOverlay.font } })}
+                        className="mt-1 h-8 w-full rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                      >
+                        <option value="impact">Impacto</option>
+                        <option value="arial">Arial forte</option>
+                        <option value="condensed">Condensada</option>
+                        <option value="serif">Serifada</option>
+                        <option value="clean">Limpa</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-muted">
+                      Tamanho da fonte
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          aria-label="Tamanho da fonte em pixels"
+                          type="range"
+                          min="24"
+                          max="140"
+                          step="1"
+                          value={reactOverlay.fontSize}
+                          onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, fontSize: Number(event.target.value) } })}
+                          className="w-full accent-accent"
+                        />
+                        <output className="w-12 text-right tabular-nums text-foreground">{reactOverlay.fontSize}px</output>
+                      </div>
+                    </label>
+                    <label className="text-xs text-muted">
+                      Cor do título
+                      <select
+                        aria-label="Cor do título da tarja"
+                        value={reactOverlay.textColor}
+                        onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, textColor: event.target.value as typeof reactOverlay.textColor } })}
+                        className="mt-1 h-8 w-full rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                      >
+                        <option value="white">Branco</option>
+                        <option value="black">Preto</option>
+                      </select>
+                    </label>
+                    <label className="text-xs text-muted">
+                      Traçado preto da fonte
+                      <div className="mt-1 flex items-center gap-2">
+                        <input
+                          aria-label="Intensidade do traçado preto da fonte"
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="1"
+                          value={reactOverlay.textOutline}
+                          onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, textOutline: Number(event.target.value) } })}
+                          className="w-full accent-accent"
+                        />
+                        <output className="w-10 text-right tabular-nums text-foreground">{reactOverlay.textOutline}%</output>
+                      </div>
+                    </label>
+                  </div>
+                  {reactOverlay.background === "custom" && (
+                    <div className="rounded-lg border border-border bg-card/50 p-2">
+                      <div className="mb-2 flex items-center justify-between text-xs text-muted">
+                        <span>Cor personalizada em RGB</span>
+                        <input
+                          aria-label="Seletor de cor RGB da tarja"
+                          type="color"
+                          value={reactOverlay.customBackground}
+                          onChange={(event) => updateOverrides({ reactOverlay: { ...reactOverlay, customBackground: event.target.value } })}
+                          className="h-7 w-10 cursor-pointer rounded border-0 bg-transparent p-0"
+                        />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        {(["r", "g", "b"] as const).map((channel) => (
+                          <label key={channel} className="text-[11px] font-semibold uppercase text-muted">
+                            {channel}
+                            <input
+                              aria-label={`Canal ${channel.toUpperCase()} da cor da tarja`}
+                              type="number"
+                              min="0"
+                              max="255"
+                              value={customRgb[channel]}
+                              onChange={(event) => updateCustomRgb(channel, Number(event.target.value))}
+                              className="mt-1 h-8 w-full rounded-lg border border-border bg-card px-2 text-xs text-foreground"
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted">{reactOverlay.customBackground.toUpperCase()}</p>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -446,7 +680,7 @@ export function EditDrawer({
                   <span className="text-[11px] tabular-nums text-gray-400">{overrides.zoom.toFixed(1)}×</span>
                 </div>
                 <p className="mb-2 -mt-1 text-[11px] text-muted">
-                  Arraste para reposicionar. Use as bordas para ajustar.
+                  Arraste a moldura para reposicionar e use qualquer borda ou canto para ajustar.
                 </p>
                 <CropBoxEditor
                   contentUrl={draft.contentUrl}
@@ -473,6 +707,48 @@ export function EditDrawer({
                     onChange={(event) => updateOverrides({ zoom: Number(event.target.value) })}
                     className="w-full accent-accent"
                   />
+                </div>
+
+                <div className="mt-3 rounded-lg border border-border bg-card/50 p-2.5">
+                  <div className="mb-2 flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-foreground">Posição do conteúdo</span>
+                    <span className="text-[10px] text-muted">ajuste fino</span>
+                  </div>
+                  <div className="space-y-2">
+                    {([
+                      ["horizontal", overrides.crop.x, Math.max(0, 1 - overrides.crop.width), (value: number) => updateOverrides({ crop: { ...overrides.crop, x: value } })],
+                      ["vertical", overrides.crop.y, Math.max(0, 1 - overrides.crop.height), (value: number) => updateOverrides({ crop: { ...overrides.crop, y: value } })],
+                    ] as const).map(([axis, value, maximum, onChange]) => (
+                      <label key={axis} className="block text-[11px] text-muted">
+                        <span className="mb-1 flex items-center justify-between">
+                          <span>{axis === "horizontal" ? "Horizontal" : "Vertical"}</span>
+                          <span className="tabular-nums text-foreground">{Math.round((maximum ? value / maximum : 0) * 100)}%</span>
+                        </span>
+                        <input
+                          aria-label={`Posição ${axis} do conteúdo`}
+                          type="range"
+                          min="0"
+                          max={maximum}
+                          step="0.001"
+                          value={value}
+                          onChange={(event) => onChange(Number(event.target.value))}
+                          disabled={maximum === 0}
+                          className="w-full accent-accent disabled:opacity-40"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <div className="mx-auto mt-2 grid w-24 grid-cols-3 gap-1">
+                    <span />
+                    <button type="button" aria-label="Mover conteúdo para cima" onClick={() => moveCrop(0, -0.01)} className="rounded border border-border bg-card py-1 text-xs text-foreground hover:bg-card-hover">↑</button>
+                    <span />
+                    <button type="button" aria-label="Mover conteúdo para a esquerda" onClick={() => moveCrop(-0.01, 0)} className="rounded border border-border bg-card py-1 text-xs text-foreground hover:bg-card-hover">←</button>
+                    <button type="button" aria-label="Centralizar conteúdo" onClick={() => updateOverrides({ crop: { ...overrides.crop, x: Math.max(0, (1 - overrides.crop.width) / 2), y: Math.max(0, (1 - overrides.crop.height) / 2) } })} className="rounded border border-border bg-card py-1 text-[10px] text-foreground hover:bg-card-hover">●</button>
+                    <button type="button" aria-label="Mover conteúdo para a direita" onClick={() => moveCrop(0.01, 0)} className="rounded border border-border bg-card py-1 text-xs text-foreground hover:bg-card-hover">→</button>
+                    <span />
+                    <button type="button" aria-label="Mover conteúdo para baixo" onClick={() => moveCrop(0, 0.01)} className="rounded border border-border bg-card py-1 text-xs text-foreground hover:bg-card-hover">↓</button>
+                    <span />
+                  </div>
                 </div>
 
                 <div className="mt-3 flex items-center justify-between gap-3">
@@ -508,6 +784,13 @@ export function EditDrawer({
                     Redefinir
                   </button>
                 </div>
+
+                {overrides.aspectMode === "free" && (
+                  <p className="mt-2 rounded-lg border border-accent/20 bg-accent/5 px-2.5 py-2 text-[11px] text-gray-300">
+                    Recorte livre ativo: cada lado pode ser ajustado independentemente, como no X Style.
+                    A prévia final à esquerda mostra exatamente como o conteúdo ficará dentro do template.
+                  </p>
+                )}
 
                 <button
                   type="button"

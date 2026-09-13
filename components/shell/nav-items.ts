@@ -9,6 +9,7 @@ import {
   Settings,
   LayoutTemplate,
   type LucideIcon,
+  ClipboardList,
 } from "lucide-react";
 
 export type NavItem = {
@@ -25,6 +26,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Biblioteca", href: "/biblioteca", icon: PlaySquare },
   { label: "Templates", href: "/templates", icon: LayoutTemplate },
   { label: "Performance", href: "/performance", icon: BarChart3 },
+  { label: "Relatório", href: "/relatorio", icon: ClipboardList },
   { label: "Criador de Avatar", href: "/criador-avatar", icon: CircleUserRound },
   { label: "Configurações", href: "/configuracoes", icon: Settings },
 ];

@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import { scheduledPostAccountsRepo, scheduledPostsRepo } from "@/lib/server/meta/db";
+import { processScheduledPostAccount } from "@/lib/server/meta/publish";
 
-/** Volta um destino "failed" pra "scheduled", limpando o erro e zerando as tentativas — pra
- *  quando a causa do erro já foi corrigida (ex.: PUBLIC_BASE_URL configurada) e o vídeo merece
- *  uma nova chance sem precisar recriar o post do zero. O próximo run-due já pega ele de volta
- *  (não mexe em scheduled_at — publica assim que rodar, já que o horário original já passou). */
+/** Reabre um destino "failed" e tenta publicá-lo imediatamente — útil quando a causa do erro
+ *  já foi corrigida (ex.: PUBLIC_BASE_URL configurada), sem recriar o post do zero. */
 export async function POST(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const destination = await scheduledPostAccountsRepo.get(id);
@@ -24,6 +23,8 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
     nextAttemptAt: null,
   });
   await scheduledPostsRepo.syncStatusFromAccounts(destination.scheduledPostId);
+  await processScheduledPostAccount(id);
+  const updated = await scheduledPostAccountsRepo.get(id);
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, account: updated });
 }

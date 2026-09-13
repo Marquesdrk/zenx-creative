@@ -1,21 +1,60 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { BadgeCheck, User } from "lucide-react";
 import { EmojiText } from "./emoji-text";
 import {
   DEFAULT_X_STYLE_LAYOUT,
+  DEFAULT_REACT_OVERLAY,
   FULL_FRAME_CROP,
   resolveXStyleLayout,
   type Crop,
   type FitMode,
   type Profile,
+  type ReactLoopMode,
+  type ReactOverlay,
   type Rotation,
   type WatermarkPosition,
   type XStyleVideoFrame,
 } from "@/lib/editor/types";
-import { contentTargetAspect } from "@/lib/editor/crop-geometry";
+import {
+  contentTargetAspect,
+  effectiveDimensions,
+  fitCenteredRect,
+  normalizedCropToPixels,
+} from "@/lib/editor/crop-geometry";
 
 const CONTENT_GRADIENT = "bg-gradient-to-br from-neutral-700 to-neutral-900";
+const REACT_OVERLAY_COLORS: Record<ReactOverlay["background"], string> = {
+  red: "#ef2029",
+  orange: "#ff7a00",
+  purple: "#7c3aed",
+  cyan: "#06b6d4",
+  pink: "#ec4899",
+  black: "#050505",
+  white: "#f5f5f5",
+  custom: "#ef2029",
+};
+const REACT_OVERLAY_FONTS: Record<ReactOverlay["font"], string> = {
+  impact: 'Impact, "Arial Black", sans-serif',
+  arial: 'Arial, sans-serif',
+  condensed: 'Bahnschrift, "Arial Narrow", sans-serif',
+  serif: 'Georgia, "Times New Roman", serif',
+  clean: 'Inter, Arial, sans-serif',
+};
+const REACT_OVERLAY_ACCENTS: Record<ReactOverlay["accent"], string> = {
+  yellow: "#facc15",
+  white: "#ffffff",
+  black: "#111111",
+  cyan: "#22d3ee",
+  pink: "#f472b6",
+};
+const TORN_CLIP_PATH = "polygon(0 8%, 3% 2%, 7% 5%, 12% 1%, 18% 6%, 24% 0, 30% 5%, 38% 1%, 45% 6%, 52% 0, 60% 5%, 68% 1%, 75% 6%, 82% 0, 90% 5%, 97% 1%, 100% 8%, 98% 92%, 94% 98%, 88% 95%, 82% 100%, 75% 94%, 68% 100%, 60% 95%, 52% 100%, 45% 94%, 38% 100%, 30% 95%, 24% 100%, 18% 94%, 12% 100%, 7% 95%, 3% 100%, 0 92%)";
+
+function overlayBackgroundColor(overlay: ReactOverlay) {
+  return overlay.background === "custom"
+    ? overlay.customBackground || REACT_OVERLAY_COLORS.red
+    : REACT_OVERLAY_COLORS[overlay.background] ?? REACT_OVERLAY_COLORS.red;
+}
 
 function VideoThumbnail({
   url,
@@ -25,6 +64,7 @@ function VideoThumbnail({
   fit = "cover",
   rotation = 0,
   playing = false,
+  loopMode = "repeat",
   style,
   frameAspect,
 }: {
@@ -39,11 +79,48 @@ function VideoThumbnail({
   fit?: FitMode;
   rotation?: Rotation;
   playing?: boolean;
+  loopMode?: ReactLoopMode;
   /** Proporção largura/altura da própria zona onde este vídeo é exibido — sem isso não dá
    *  pra calcular corretamente como o recorte interage com cover/contain. */
   frameAspect?: number;
 }) {
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const reverseTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (reverseTimerRef.current !== null) window.clearInterval(reverseTimerRef.current);
+    };
+  }, [url]);
+
+  useEffect(() => {
+    if (loopMode !== "pingpong" || !playing) {
+      if (reverseTimerRef.current !== null) {
+        window.clearInterval(reverseTimerRef.current);
+        reverseTimerRef.current = null;
+      }
+    }
+  }, [loopMode, playing]);
+
+  function startReversePlayback(video: HTMLVideoElement) {
+    if (reverseTimerRef.current !== null) window.clearInterval(reverseTimerRef.current);
+    video.pause();
+    let previous = performance.now();
+    reverseTimerRef.current = window.setInterval(() => {
+      const now = performance.now();
+      const elapsed = Math.min(0.1, (now - previous) / 1000);
+      previous = now;
+      video.currentTime = Math.max(0, video.currentTime - elapsed);
+      if (video.currentTime <= 0.02) {
+        if (reverseTimerRef.current !== null) window.clearInterval(reverseTimerRef.current);
+        reverseTimerRef.current = null;
+        video.currentTime = 0;
+        void video.play().catch(() => undefined);
+      }
+    }, 33);
+  }
 
   if (url) {
     // Sem dimensões reais do vídeo (ou sem frameAspect) não dá pra calcular o recorte com
@@ -53,14 +130,29 @@ function VideoThumbnail({
     let videoStyle: CSSProperties = { transform: `rotate(${rotation}deg)` };
 
     if (natural && frameAspect) {
-      const rotated = rotation === 90 || rotation === 270;
-      const rawWidth = rotated ? natural.height : natural.width;
-      const rawHeight = rotated ? natural.width : natural.height;
-      const cropWidth = rawWidth * crop.width;
-      const cropHeight = rawHeight * crop.height;
-      const cropAspect = cropWidth / Math.max(1, cropHeight);
+      const effective = effectiveDimensions(natural.width, natural.height, rotation);
+      const selected = normalizedCropToPixels(crop, effective.width, effective.height);
+      const fitted =
+        fit === "cover"
+          ? fitCenteredRect(selected.width, selected.height, zoom, frameAspect)
+          : selected;
+      const fittedX = selected.x + fitted.x;
+      const fittedY = selected.y + fitted.y;
+      const scale =
+        fit === "cover"
+          ? 1 / Math.max(1, fitted.height)
+          : Math.min(frameAspect / Math.max(1, selected.width), 1 / Math.max(1, selected.height));
+      const displayedWidth = effective.width * scale;
+      const displayedHeight = effective.height * scale;
+      const videoWidthPct = (displayedWidth / frameAspect) * 100;
+      const videoHeightPct = displayedHeight * 100;
+      const videoLeftPct =
+        ((fit === "contain" ? (frameAspect - displayedWidth) / 2 : 0) - fittedX * scale) /
+        frameAspect *
+        100;
+      const videoTopPct = ((fit === "contain" ? (1 - displayedHeight) / 2 : 0) - fittedY * scale) * 100;
 
-      // Passo 1: encaixa a região recortada no quadro alvo — "cover" amplia o centro pelo
+      /* Passo 1: encaixa a região recortada no quadro alvo — "cover" amplia o centro pelo
       // zoom até preencher (o excedente é descartado pelo overflow-hidden do wrapper,
       // exatamente como o crop adicional do render real), "contain" só cabe dentro, sem cortar.
       let boxWidthPct: number;
@@ -90,10 +182,7 @@ function VideoThumbnail({
 
       // Passo 2: o <video> precisa ser ampliado/deslocado de forma que só a região `crop`
       // caia exatamente dentro da caixa calculada acima.
-      const videoWidthPct = boxWidthPct / crop.width;
-      const videoHeightPct = boxHeightPct / crop.height;
-      const videoLeftPct = boxLeftPct - crop.x * videoWidthPct;
-      const videoTopPct = boxTopPct - crop.y * videoHeightPct;
+      */
 
       videoClassName = "absolute";
       videoStyle = {
@@ -101,6 +190,12 @@ function VideoThumbnail({
         top: `${videoTopPct}%`,
         width: `${videoWidthPct}%`,
         height: `${videoHeightPct}%`,
+        // O preflight do Tailwind aplica max-width: 100% e height: auto em <video>.
+        // Isso comprime a mídia quando o recorte precisa ampliar a origem e deixa a área
+        // inferior aparentemente preta. O render final não tem essa limitação.
+        maxWidth: "none",
+        maxHeight: "none",
+        display: "block",
         transform: `rotate(${rotation}deg)`,
       };
     }
@@ -110,31 +205,147 @@ function VideoThumbnail({
       // vaza pra fora dela (ex.: cobrindo a faixa de reação acima).
       <div className={`${className} relative overflow-hidden`} style={style}>
         <video
+          ref={videoRef}
           src={url}
           muted
           autoPlay={playing}
-          loop={playing}
+          loop={playing && loopMode === "repeat"}
           playsInline
           preload="metadata"
+          onLoadStart={() => setLoadError(false)}
+          onError={() => setLoadError(true)}
           // Sem isso o vídeo pausado mostra um frame preto até o usuário interagir — busca um
           // instante adiante pra prévia já nascer com uma imagem real do conteúdo. Também
           // captura a resolução real, necessária pro cálculo do recorte.
           onLoadedMetadata={(event) => {
             const video = event.currentTarget;
+            video.playbackRate = 1;
+            if (reverseTimerRef.current !== null) window.clearInterval(reverseTimerRef.current);
+            reverseTimerRef.current = null;
             if (Number.isFinite(video.duration)) {
-              video.currentTime = Math.min(0.1, video.duration / 2);
+              // Muitos vídeos exportados começam com uma pequena faixa preta. Um frame
+              // ligeiramente adiante deixa a prévia útil sem alterar o arquivo original.
+              video.currentTime = Math.min(1, video.duration / 2);
             }
             if (video.videoWidth && video.videoHeight) {
               setNatural({ width: video.videoWidth, height: video.videoHeight });
             }
           }}
+          onLoadedData={(event) => {
+            const video = event.currentTarget;
+            if (playing && video.paused) void video.play().catch(() => undefined);
+          }}
+          onEnded={(event) => {
+            if (loopMode !== "pingpong" || !playing) return;
+            const video = event.currentTarget;
+            startReversePlayback(video);
+          }}
           className={videoClassName}
           style={videoStyle}
         />
+        {loadError && (
+          <div className="absolute inset-0 flex items-center justify-center bg-[#171717] p-3 text-center text-[10px] text-red-200">
+            Não foi possível carregar este vídeo de conteúdo.
+          </div>
+        )}
       </div>
     );
   }
-  return <div className={`${className} ${CONTENT_GRADIENT}`} style={style} />;
+  return (
+    <div className={`${className} ${CONTENT_GRADIENT} flex items-center justify-center p-3 text-center`} style={style}>
+      <span className="text-[10px] text-gray-300">Conteúdo importado sem prévia</span>
+    </div>
+  );
+}
+
+function ReactFinalPreview({
+  reactionUrl,
+  contentUrl,
+  contentCrop,
+  contentFit,
+  contentZoom,
+  contentRotation,
+  contentFrameAspect,
+  reactOverlay,
+  reactionLoopMode,
+  playing,
+}: {
+  reactionUrl: string | null;
+  contentUrl: string | null;
+  contentCrop: Crop;
+  contentFit: FitMode;
+  contentZoom: number;
+  contentRotation: Rotation;
+  contentFrameAspect: number;
+  reactOverlay: ReactOverlay;
+  reactionLoopMode: ReactLoopMode;
+  playing: boolean;
+}) {
+  return (
+    <div data-testid="react-final-preview" className="absolute inset-0 isolate overflow-hidden bg-black" style={{ containerType: "inline-size" }}>
+      <div className="absolute inset-x-0 top-0 z-20 h-[36%] overflow-hidden">
+        <VideoThumbnail
+          url={reactionUrl}
+          className="h-full w-full"
+          playing={playing}
+          loopMode={reactionLoopMode}
+        />
+      </div>
+      <div className="absolute inset-x-0 bottom-0 top-[36%] z-10 overflow-hidden bg-neutral-950">
+        <VideoThumbnail
+          url={contentUrl}
+          crop={contentCrop}
+          zoom={contentZoom}
+          fit={contentFit}
+          rotation={contentRotation}
+          frameAspect={contentFrameAspect}
+          playing={playing}
+          className="h-full w-full"
+        />
+        {reactOverlay.enabled && reactOverlay.text.trim() && (() => {
+          const torn = reactOverlay.template === "torn";
+          const outline = Math.max(0, Math.min(100, reactOverlay.textOutline ?? 0));
+          const backgroundColor = overlayBackgroundColor(reactOverlay);
+          const fontSize = Math.max(24, Math.min(140, reactOverlay.fontSize ?? 66));
+          const textStyle = {
+            backgroundColor,
+            backgroundImage:
+              reactOverlay.template === "gradient"
+                ? `linear-gradient(100deg, ${backgroundColor}, ${REACT_OVERLAY_ACCENTS[reactOverlay.accent]})`
+                : undefined,
+            color: reactOverlay.textColor === "white" ? "#fff" : "#111",
+            WebkitTextStroke: `${((outline / 100) * 14 / 10.8).toFixed(3)}cqw #000`,
+            paintOrder: "stroke fill",
+            fontFamily: REACT_OVERLAY_FONTS[reactOverlay.font] ?? REACT_OVERLAY_FONTS.impact,
+            fontSize: `clamp(10px, ${(fontSize / 10.8).toFixed(3)}cqw, 140px)`,
+            lineHeight: 1.12,
+            textShadow:
+              reactOverlay.template === "neon" && reactOverlay.textColor === "white"
+                ? `0 0 8px ${REACT_OVERLAY_ACCENTS[reactOverlay.accent]}`
+                : undefined,
+          };
+          const text = <EmojiText text={reactOverlay.text} />;
+          return torn ? (
+            <div
+              className="absolute left-0 top-0 z-30 w-full text-center"
+              style={{ backgroundColor: "#f4f1e8", clipPath: TORN_CLIP_PATH, padding: "0.556cqw" }}
+            >
+              <div className="text-[clamp(10px,2.2cqw,24px)] font-extrabold" style={{ ...textStyle, padding: "1.852cqw 5.556cqw" }}>
+                {text}
+              </div>
+            </div>
+          ) : (
+            <div
+              className="absolute left-0 top-0 z-30 w-full text-center text-[clamp(10px,2.2cqw,24px)] font-extrabold"
+              style={{ ...textStyle, padding: "1.852cqw 5.556cqw", border: "none", boxShadow: "none" }}
+            >
+              {text}
+            </div>
+          );
+        })()}
+      </div>
+    </div>
+  );
 }
 
 export function VideoFrame({
@@ -148,6 +359,8 @@ export function VideoFrame({
   contentRotation = 0,
   playing = false,
   reactionMediaUrl = null,
+  reactOverlay = null,
+  reactionLoopMode = "repeat",
   watermarkPosition = null,
   xStyleVideoFrame = null,
 }: {
@@ -163,6 +376,8 @@ export function VideoFrame({
   playing?: boolean;
   /** Só relevante quando profile.engine === "REACT". */
   reactionMediaUrl?: string | null;
+  reactOverlay?: ReactOverlay | null;
+  reactionLoopMode?: ReactLoopMode;
   /** Só relevante quando profile.engine === "UGC". Posição x/y é relativa (0 a 1). */
   watermarkPosition?: WatermarkPosition | null;
   /** Só relevante quando profile.engine === "X_STYLE". Medidas no canvas 1080x1920. */
@@ -178,22 +393,18 @@ export function VideoFrame({
       className="relative aspect-[9/16] w-full overflow-hidden rounded-xl border border-border bg-black"
     >
       {profile.engine === "REACT" && (
-        <>
-          <VideoThumbnail
-            url={reactionMediaUrl}
-            className="absolute inset-x-0 top-0 z-10 h-[36%] border-b border-dashed border-white/20"
-          />
-          <VideoThumbnail
-            url={contentUrl}
-            crop={contentCrop}
-            zoom={contentZoom}
-            fit={contentFit}
-            rotation={contentRotation}
-            frameAspect={contentFrameAspect}
-            playing={playing}
-            className="absolute inset-x-0 bottom-0 top-[36%] z-0"
-          />
-        </>
+        <ReactFinalPreview
+          reactionUrl={reactionMediaUrl}
+          contentUrl={contentUrl}
+          contentCrop={contentCrop}
+          contentFit={contentFit}
+          contentZoom={contentZoom}
+          contentRotation={contentRotation}
+          contentFrameAspect={contentFrameAspect}
+          reactOverlay={{ ...DEFAULT_REACT_OVERLAY, ...(reactOverlay ?? {}) }}
+          reactionLoopMode={reactionLoopMode}
+          playing={playing}
+        />
       )}
 
       {profile.engine === "X_STYLE" && (

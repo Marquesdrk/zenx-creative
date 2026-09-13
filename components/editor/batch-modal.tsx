@@ -31,7 +31,8 @@ export function BatchModal({
 
   const fileCount = source === "upload" ? uploadedFiles.length : selectedDriveFiles.length;
   const selectedProfile = profiles.find((p) => p.id === profileId) ?? null;
-  const canSubmit = fileCount > 0 && selectedProfile !== null;
+  const missingReactMedia = selectedProfile?.engine === "REACT" && selectedProfile.reactionMedia.length === 0;
+  const canSubmit = fileCount > 0 && selectedProfile !== null && !missingReactMedia;
 
   function toggleDriveFile(name: string) {
     setSelectedDriveFiles((current) =>
@@ -168,6 +169,22 @@ export function BatchModal({
             </div>
           )}
         </div>
+
+        {selectedProfile?.engine === "REACT" && (
+          <div className={`rounded-lg border p-3 text-xs ${missingReactMedia ? "border-amber-400/40 bg-amber-400/5 text-amber-200" : "border-accent/30 bg-accent/5 text-gray-300"}`}>
+            {missingReactMedia ? (
+              <>
+                Este perfil React ainda não tem vídeos de reação. Cadastre pelo menos um em
+                <a href="/configuracoes" className="ml-1 font-semibold underline">Configurações</a> antes de importar o lote.
+              </>
+            ) : (
+              <>
+                {selectedProfile.reactionMedia.length} vídeo(s) de reação salvo(s). O sistema alternará entre eles
+                automaticamente e unirá a reação na parte superior ao conteúdo importado na parte inferior.
+              </>
+            )}
+          </div>
+        )}
 
         <button
           type="button"

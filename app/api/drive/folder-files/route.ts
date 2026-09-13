@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isDriveConfigured, isDriveConnected, listFilesInFolder, scheduledVideosFolderSegments } from "@/lib/server/google-drive";
+import { ensureScheduledVideosFolder, isDriveConfigured, isDriveConnected, listFilesInFolder, scheduledVideosFolderSegments } from "@/lib/server/google-drive";
 import { scheduledPostsRepo, socialAccountsRepo } from "@/lib/server/meta/db";
 
 /** Lista os vídeos "disponíveis" (ainda não agendados) na pasta de agendados de uma conta —
@@ -24,6 +24,9 @@ export async function GET(request: Request) {
     }
     const folderName = account.username || account.accountName;
 
+    // Contas conectadas antes da criação automática podem ainda não ter uma pasta.
+    // Garantimos a pasta antes da leitura para o planejamento funcionar sem ação manual.
+    await ensureScheduledVideosFolder(folderName);
     const files = await listFilesInFolder(scheduledVideosFolderSegments(folderName));
     const posts = await scheduledPostsRepo.list();
     const usedDriveFileIds = new Set(posts.filter((p) => p.status !== "cancelled" && p.status !== "failed").map((p) => p.driveFileId));

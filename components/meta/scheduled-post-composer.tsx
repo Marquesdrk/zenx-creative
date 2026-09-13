@@ -3,6 +3,7 @@
 import { upload } from "@vercel/blob/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, HardDrive, Send, Upload, X } from "lucide-react";
+import { BEST_TIME_SLOTS, planSchedule } from "@/lib/scheduling/plan";
 import type { PublicSocialAccount } from "@/lib/server/meta/types";
 
 const IS_VERCEL = Boolean(process.env.NEXT_PUBLIC_IS_VERCEL);
@@ -17,6 +18,23 @@ function toDatetimeLocal(date: Date) {
   const offset = date.getTimezoneOffset();
   const local = new Date(date.getTime() - offset * 60_000);
   return local.toISOString().slice(0, 16);
+}
+
+async function createScheduledPostWithRetry(payload: Record<string, unknown>) {
+  let lastError = "Falha ao criar a publicação.";
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const res = await fetch("/api/scheduled-posts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json().catch(() => ({} as { error?: string; retryable?: boolean }));
+    if (res.ok) return { ok: true as const };
+    lastError = data.error || lastError;
+    if (!data.retryable && ![502, 503, 504].includes(res.status)) break;
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+  }
+  return { ok: false as const, error: lastError };
 }
 
 /** Formulário de "Novo conteúdo": upload de vídeo, legenda, seleção de contas conectadas e
@@ -58,6 +76,10 @@ export function ScheduledPostComposer({
   const instagramAccounts = connectedAccounts.filter((a) => a.platform === "INSTAGRAM");
   const facebookAccounts = connectedAccounts.filter((a) => a.platform === "FACEBOOK");
   const driveAvailable = Boolean(driveStatus?.configured && driveStatus?.connected);
+  const previewSchedule = useMemo(
+    () => planSchedule(Math.max(0, videoFiles.length - 1), BEST_TIME_SLOTS.length, new Date(scheduledAt), BEST_TIME_SLOTS),
+    [scheduledAt, videoFiles.length]
+  );
 
   function toggle(id: string) {
     setSelected((current) => {
@@ -154,21 +176,12 @@ export function ScheduledPostComposer({
       payload = { videoSource: "url", videoUrl: data.url };
     }
 
-    const res = await fetch("/api/scheduled-posts", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ...payload,
-        caption,
-        scheduledAt: mode === "now" ? null : scheduledFor!.toISOString(),
-        socialAccountIds: selectedIds,
-      }),
+    return createScheduledPostWithRetry({
+      ...payload,
+      caption,
+      scheduledAt: mode === "now" ? null : scheduledFor!.toISOString(),
+      socialAccountIds: selectedIds,
     });
-    if (!res.ok) {
-      const data = await res.json().catch(() => ({}));
-      return { ok: false, error: data.error || "Falha ao criar a publicação." };
-    }
-    return { ok: true };
   }
 
   async function submit(mode: "schedule" | "now") {
@@ -185,29 +198,44 @@ export function ScheduledPostComposer({
 
     const selectedIds = Array.from(selected);
     const baseScheduledAt = new Date(scheduledAt);
+    // O agendamento em massa usa os mesmos horários exibidos no planejador automático.
+    // O campo de data define apenas a primeira data; não devemos transformar o horário atual
+    // do campo (ex.: 02:06) em horário de publicação de todos os vídeos.
+    const plannedSchedule =
+      mode === "schedule"
+        ? planSchedule(Math.max(0, videoFiles.length - 1), BEST_TIME_SLOTS.length, baseScheduledAt, BEST_TIME_SLOTS)
+        : [];
     const failures: string[] = [];
+    const failedIndexes = new Set<number>();
     for (let i = 0; i < videoFiles.length; i += 1) {
       setProgressLabel(videoFiles.length > 1 ? `Enviando ${i + 1}/${videoFiles.length}` : null);
-      // Com mais de um vídeo, cada um pega o dia seguinte no mesmo horário escolhido — nunca
-      // reaproveita a mesma data pra todos (isso publicaria o lote inteiro de uma vez só).
-      const scheduledFor = mode === "schedule" ? addDays(baseScheduledAt, i) : null;
-      const result = await submitOneFile(videoFiles[i], mode, selectedIds, scheduledFor);
-      if (!result.ok) failures.push(`${videoFiles[i].name}: ${result.error}`);
+      // No planejamento, o primeiro vídeo é um teste imediato. Os demais seguem os 7 horários
+      // padrão (08:00, 11:00, 13:00, 15:00, 17:00, 19:00 e 21:00), repetindo no dia seguinte.
+      const testNow = mode === "now" || (mode === "schedule" && i === 0);
+      const scheduledFor = testNow ? null : plannedSchedule[i - 1] ?? addDays(baseScheduledAt, i);
+      const result = await submitOneFile(videoFiles[i], testNow ? "now" : "schedule", selectedIds, scheduledFor);
+      if (!result.ok) {
+        failedIndexes.add(i);
+        failures.push(`${videoFiles[i].name}: ${result.error}`);
+      }
     }
 
     setSubmitting(null);
     setProgressLabel(null);
     if (failures.length > 0) {
+      setVideoFiles(videoFiles.filter((_, index) => failedIndexes.has(index)));
       setError(
         failures.length === videoFiles.length
           ? failures.join(" | ")
           : `${videoFiles.length - failures.length}/${videoFiles.length} enviados. Falhas — ${failures.join(" | ")}`
       );
     }
-    setVideoFiles([]);
-    setCaption("");
-    setSelected(new Set());
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (failures.length === 0) {
+      setVideoFiles([]);
+      setCaption("");
+      setSelected(new Set());
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
     onCreated();
   }
 
@@ -313,12 +341,18 @@ export function ScheduledPostComposer({
         </label>
         {videoFiles.length > 1 && (
           <p className="mt-1.5 text-[11px] normal-case text-gray-400">
-            {videoFiles.length} vídeos → 1 por dia neste horário, começando em{" "}
+            {videoFiles.length} vídeos → 1 teste agora e até 7 por dia nos horários padrão, começando em{" "}
             {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(new Date(scheduledAt))} (até{" "}
-            {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(addDays(new Date(scheduledAt), videoFiles.length - 1))}
-            ). Pra postar vários no mesmo dia, use o agendamento automático em massa abaixo.
+            {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(
+              previewSchedule[previewSchedule.length - 1] ?? new Date(scheduledAt)
+            )}
+            ).
           </p>
         )}
+        <p className="mt-1.5 text-[11px] normal-case text-gray-400">
+          Ao agendar, o primeiro vídeo será publicado imediatamente como teste; os demais seguirão os horários padrão
+          (08:00, 11:00, 13:00, 15:00, 17:00, 19:00 e 21:00), começando na data escolhida.
+        </p>
       </div>
 
       {error && <p className="mt-3 rounded-lg bg-red-500/10 p-2 text-xs text-red-300">{error}</p>}

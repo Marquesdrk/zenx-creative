@@ -17,7 +17,8 @@ import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
 import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
 
-const MAX_PARALLEL_RENDERS = 3;
+// Keep at most two FFmpeg jobs active; each is independently limited to two threads.
+const MAX_PARALLEL_RENDERS = 1;
 
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
@@ -50,24 +51,28 @@ async function mapWithConcurrency<T, R>(
 ) {
   const results = new Array<R>(entries.length);
   let nextIndex = 0;
+  let failure: unknown;
 
   async function worker() {
-    while (nextIndex < entries.length) {
+    while (nextIndex < entries.length && failure === undefined) {
       const currentIndex = nextIndex;
       nextIndex += 1;
-      results[currentIndex] = await mapper(entries[currentIndex]);
+      try {
+        results[currentIndex] = await mapper(entries[currentIndex]);
+      } catch (error) {
+        failure = error;
+      }
     }
   }
 
   const workerCount = Math.min(limit, entries.length);
   await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  if (failure !== undefined) throw failure;
   return results;
 }
 
-// O profile pode trazer avatarUrl/backgroundImageUrl/watermarkImageUrl/reactionMedia como
-// data: URLs (imagem salva inline no perfil) — não precisam de nenhuma ponte via Blob, o
-// pipeline de render já decodifica data: URLs direto no servidor (materializeMediaUrl em
-// lib/server/render.ts), então o profile vai como está no payload de cada requisição.
+// Os assets do perfil podem ser URLs do armazenamento do app ou do proxy do Google Drive. O
+// pipeline de render materializa ambos no servidor antes de chamar o ffmpeg.
 
 const IS_VERCEL = Boolean(process.env.NEXT_PUBLIC_IS_VERCEL);
 
@@ -78,7 +83,7 @@ const IS_VERCEL = Boolean(process.env.NEXT_PUBLIC_IS_VERCEL);
 async function sendExportRequest(params: {
   batchId: string;
   profile: Profile;
-  response: "video" | "drive";
+  response: "video" | "drive" | "stage";
   socialAccountId?: string;
   item: BatchItem;
   file: File;
@@ -186,6 +191,7 @@ export default function EditorPage() {
         sourceAnalysis: null,
         manualOverrides: createDefaultManualOverrides({
           title: profile.engine === "X_STYLE" ? profile.defaultTitle : undefined,
+          aspectMode: profile.engine === "REACT" ? "free" : undefined,
           caption: generateCaption(name, profile),
           watermarkPosition: { ...watermarkDefaults },
           reactionMediaId:
@@ -247,49 +253,103 @@ export default function EditorPage() {
     setExportingBatchId(batchId);
     setExportProgressLabel(`Exportando 0/${batchItems.length}`);
     setPageError(null);
+    const stagedItemIds: string[] = [];
     try {
-      // Um item por vez (concorrência limitada): na Vercel isso também evita ter dezenas de
-      // vídeos originais parados no Blob ao mesmo tempo (cada um some assim que a própria
-      // renderização termina, já dentro de export-local); localmente nem passa pelo Blob.
-      let rendered = 0;
-      const zipFiles = await mapWithConcurrency(
-        batchItems.map((item, index) => ({ item, index })),
-        MAX_PARALLEL_RENDERS,
-        async ({ item, index }) => {
+      if (IS_VERCEL) {
+        // As functions Vercel são efêmeras; nelas, mantém o fluxo com Blob e arquivo
+        // ZIP montado no cliente. No desktop local, a variante abaixo trabalha em disco.
+        let rendered = 0;
+        const zipFiles = await mapWithConcurrency(
+          batchItems.map((item, index) => ({ item, index })),
+          MAX_PARALLEL_RENDERS,
+          async ({ item, index }) => {
+            const file = fileRefs.current.get(item.id);
+            if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
+
+            const res = await sendExportRequest({ batchId, profile, response: "video", item, file });
+            if (!res.ok) {
+              const message = await responseErrorMessage(res, `Falha ao exportar "${item.filename}" (${res.status}).`);
+              throw new Error(message);
+            }
+
+            const content = new Uint8Array(await res.arrayBuffer());
+            rendered += 1;
+            setExportProgressLabel(`Exportando ${rendered}/${batchItems.length}`);
+            return {
+              filename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
+              content,
+            };
+          }
+        );
+
+        setExportProgressLabel("Gerando ZIP");
+        const zipBlob = createZipBlob(zipFiles);
+        const downloadUrl = URL.createObjectURL(zipBlob);
+        const link = document.createElement("a");
+        link.href = downloadUrl;
+        link.download = zipArchiveFilename(`lote-${batchId}`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(downloadUrl);
+      } else {
+        let rendered = 0;
+        await mapWithConcurrency(batchItems, MAX_PARALLEL_RENDERS, async (item) => {
           const file = fileRefs.current.get(item.id);
           if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
 
-          const res = await sendExportRequest({ batchId, profile, response: "video", item, file });
+          const res = await sendExportRequest({ batchId, profile, response: "stage", item, file });
           if (!res.ok) {
             const message = await responseErrorMessage(res, `Falha ao exportar "${item.filename}" (${res.status}).`);
             throw new Error(message);
           }
 
-          const content = new Uint8Array(await res.arrayBuffer());
+          stagedItemIds.push(item.id);
           rendered += 1;
-          setExportProgressLabel(`Exportando ${rendered}/${batchItems.length}`);
-          return {
-            filename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
-            content,
-          };
-        }
-      );
+          setExportProgressLabel(`Renderizando ${rendered}/${batchItems.length}`);
+        });
 
-      setExportProgressLabel("Gerando ZIP");
-      const zipBlob = createZipBlob(zipFiles);
-      const downloadUrl = URL.createObjectURL(zipBlob);
-      const link = document.createElement("a");
-      link.href = downloadUrl;
-      link.download = zipArchiveFilename(`lote-${batchId}`);
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(downloadUrl);
+        setExportProgressLabel("Montando arquivo para download");
+        const zipResponse = await fetch("/api/batches/export-local", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            batchId,
+            profile,
+            response: "zip-staged",
+            items: batchItems.map(({ id, filename }) => ({ id, filename })),
+          }),
+        });
+        if (!zipResponse.ok) {
+          const message = await responseErrorMessage(zipResponse, `Falha ao montar o ZIP (${zipResponse.status}).`);
+          throw new Error(message);
+        }
+
+        const download = (await zipResponse.json()) as { downloadUrl: string; filename: string };
+        const link = document.createElement("a");
+        link.href = download.downloadUrl;
+        link.download = download.filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+      }
 
       batchItems.forEach(removeLocalItemFiles);
       setBatches((current) => current.filter((candidate) => candidate.id !== batchId));
       setItems((current) => current.filter((item) => item.batchId !== batchId));
     } catch (error) {
+      if (stagedItemIds.length > 0) {
+        await fetch("/api/batches/export-local", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            batchId,
+            profile,
+            response: "discard-staged",
+            items: stagedItemIds.map((id) => ({ id, filename: "staged.mp4" })),
+          }),
+        }).catch(() => undefined);
+      }
       setPageError(error instanceof Error ? error.message : "Falha ao exportar o lote.");
     } finally {
       setExportingBatchId(null);

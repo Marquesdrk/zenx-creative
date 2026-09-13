@@ -4,12 +4,46 @@ export type Engine = "REACT" | "X_STYLE" | "UGC";
 export type ReactionMedia = {
   id: string;
   label: string;
-  /** Object URL do vídeo/imagem de reação enviado. Null enquanto não for enviado. */
+  /** URL do proxy do Drive usada pelo preview. */
   url: string | null;
+  /** ID permanente do arquivo no Google Drive. */
+  driveFileId?: string | null;
 };
 
 /** Posições sempre relativas (0 a 1), nunca em pixels. */
 export type WatermarkPosition = { x: number; y: number; scale: number; opacity: number };
+export type ReactOverlayTemplate = "solid" | "gradient" | "neon" | "torn";
+export type ReactOverlayColor = "red" | "orange" | "purple" | "cyan" | "pink" | "black" | "white" | "custom";
+export type ReactOverlayAccent = "yellow" | "white" | "black" | "cyan" | "pink";
+export type ReactOverlayFont = "impact" | "arial" | "condensed" | "serif" | "clean";
+export type ReactLoopMode = "repeat" | "pingpong";
+
+export type ReactOverlay = {
+  enabled: boolean;
+  text: string;
+  template: ReactOverlayTemplate;
+  background: ReactOverlayColor;
+  customBackground: string;
+  textColor: "white" | "black";
+  accent: ReactOverlayAccent;
+  font: ReactOverlayFont;
+  fontSize: number;
+  textOutline: number;
+  position: "under_reaction" | "top" | "center" | "bottom";
+};
+export const DEFAULT_REACT_OVERLAY: ReactOverlay = {
+  enabled: false,
+  text: "",
+  template: "solid",
+  background: "red",
+  customBackground: "#ef2029",
+  textColor: "white",
+  accent: "yellow",
+  font: "impact",
+  fontSize: 66,
+  textOutline: 70,
+  position: "under_reaction",
+};
 /** Como o vídeo importado preenche o quadro do template. */
 export type FitMode = "cover" | "contain";
 export type Rotation = 0 | 90 | 180 | 270;
@@ -40,6 +74,9 @@ export const ASPECT_MODE_LABELS: Record<AspectMode, string> = {
 export type ReactProfile = {
   id: string;
   name: string;
+  handle?: string;
+  /** Foto usada nas listas e relatórios; pode ser herdada da conta social vinculada. */
+  profilePictureUrl?: string | null;
   engine: "REACT";
   /** Template que define posições/comportamento visual deste perfil. */
   templateId: string;
@@ -53,6 +90,8 @@ export type XStyleProfile = {
   engine: "X_STYLE";
   templateId: string;
   handle: string;
+  /** Foto de perfil compartilhada com o relatório; também sincronizada com avatarUrl. */
+  profilePictureUrl?: string | null;
   /** Object URL da foto de perfil enviada. Null enquanto não for enviada. */
   avatarUrl: string | null;
   verified: boolean;
@@ -72,8 +111,11 @@ export type XStyleProfile = {
 export type UgcProfile = {
   id: string;
   name: string;
+  handle?: string;
   engine: "UGC";
   templateId: string;
+  /** Foto usada nas listas e relatórios; pode ser herdada da conta social vinculada. */
+  profilePictureUrl?: string | null;
   /** Object URL da imagem de marca d'água personalizada enviada. Null = sem marca (opcional). */
   watermarkImageUrl: string | null;
 };
@@ -184,18 +226,26 @@ export type ManualOverrides = {
   muted: boolean;
   /** Mídia de reação escolhida manualmente (engine REACT); null nos demais engines. */
   reactionMediaId: string | null;
+  /** Como repetir a reação quando ela for menor que o conteúdo. */
+  reactionLoopMode: ReactLoopMode;
+  /** Tarja opcional com texto de destaque sobre a área do conteúdo no template React. */
+  reactOverlay: ReactOverlay;
 };
 
 export function createDefaultManualOverrides(
   params: Pick<ManualOverrides, "caption" | "watermarkPosition" | "reactionMediaId"> & {
     title?: string;
+    aspectMode?: AspectMode;
   }
 ): ManualOverrides {
   return {
     ...params,
     title: params.title ?? "",
     crop: { ...FULL_FRAME_CROP },
-    aspectMode: "template",
+    // React começa livre para que o enquadramento da reação não imponha uma proporção
+    // artificial ao conteúdo importado. O usuário ainda pode escolher Template/9:16/etc.
+    // no editor quando quiser padronizar o lote.
+    aspectMode: params.aspectMode ?? "template",
     zoom: 1,
     fit: "cover",
     rotation: 0,
@@ -203,6 +253,8 @@ export function createDefaultManualOverrides(
     trimEnd: null,
     volume: 1,
     muted: false,
+    reactionLoopMode: "repeat",
+    reactOverlay: { ...DEFAULT_REACT_OVERLAY },
   };
 }
 

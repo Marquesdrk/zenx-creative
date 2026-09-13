@@ -31,8 +31,9 @@ function loadStoredTimeSlots(): string[] {
 /** Agendamento automático em massa: em vez de escolher vídeo por vídeo, o usuário escolhe uma
  *  conta e quantos vídeos por dia — o sistema conta quantos vídeos ainda não usados existem na
  *  pasta de agendados dessa conta no Drive (a mesma que "Enviar ao Drive" no Editor em massa
- *  alimenta) e distribui todos nos horários escolhidos abaixo (editáveis, com os "melhores
- *  horários" como sugestão inicial). Os horários ficam salvos neste navegador. */
+ *  alimenta), publica o primeiro imediatamente como teste e distribui os demais nos horários
+ *  escolhidos abaixo (editáveis, com os "melhores horários" como sugestão inicial). Os horários
+ *  ficam salvos neste navegador. */
 export function BulkScheduleComposer({
   accounts,
   onCreated,
@@ -115,11 +116,13 @@ export function BulkScheduleComposer({
 
   const preview = useMemo(() => {
     if (!files || files.length === 0) return null;
-    const schedule = planSchedule(files.length, effectiveVideosPerDay, new Date(), timeSlots);
+    const scheduledCount = Math.max(0, files.length - 1);
+    const schedule = planSchedule(scheduledCount, effectiveVideosPerDay, new Date(), timeSlots);
+    const fallbackDate = new Date();
     return {
-      first: schedule[0],
-      last: schedule[schedule.length - 1],
-      days: Math.ceil(files.length / effectiveVideosPerDay),
+      first: schedule[0] ?? fallbackDate,
+      last: schedule[schedule.length - 1] ?? fallbackDate,
+      days: Math.max(1, Math.ceil(scheduledCount / effectiveVideosPerDay)),
     };
   }, [files, effectiveVideosPerDay, timeSlots]);
 
@@ -142,29 +145,40 @@ export function BulkScheduleComposer({
       return;
     }
 
-    const schedule = planSchedule(freshFiles.length, effectiveVideosPerDay, new Date(), timeSlots);
+    const scheduledFiles = freshFiles.slice(1);
+    const schedule = planSchedule(scheduledFiles.length, effectiveVideosPerDay, new Date(), timeSlots);
 
     try {
       for (let i = 0; i < freshFiles.length; i += 1) {
-        setProgressLabel(`Agendando ${i + 1}/${freshFiles.length}`);
-        const res = await fetch("/api/scheduled-posts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            videoSource: "drive",
-            driveFileId: freshFiles[i].id,
-            driveFileName: freshFiles[i].name,
-            caption,
-            scheduledAt: schedule[i].toISOString(),
-            socialAccountIds: [socialAccountId],
-          }),
-        });
-        if (!res.ok) {
-          const data = await res.json().catch(() => ({}) as { error?: string });
-          throw new Error(data.error || `Falha ao agendar "${freshFiles[i].name}".`);
+        setProgressLabel(i === 0 ? `Publicando teste 1/${freshFiles.length}` : `Agendando ${i + 1}/${freshFiles.length}`);
+        const payload = {
+          videoSource: "drive",
+          driveFileId: freshFiles[i].id,
+          driveFileName: freshFiles[i].name,
+          caption,
+          scheduledAt: i === 0 ? null : schedule[i - 1].toISOString(),
+          socialAccountIds: [socialAccountId],
+        };
+        let lastError = `Falha ao agendar "${freshFiles[i].name}".`;
+        let created = false;
+        for (let attempt = 0; attempt < 3; attempt += 1) {
+          const res = await fetch("/api/scheduled-posts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await res.json().catch(() => ({}) as { error?: string; retryable?: boolean });
+          if (res.ok) {
+            created = true;
+            break;
+          }
+          lastError = data.error || lastError;
+          if ((!data.retryable && ![502, 503, 504].includes(res.status)) || attempt === 2) break;
+          await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
         }
+        if (!created) throw new Error(lastError);
       }
-      setSuccessMessage(`${freshFiles.length} vídeo(s) agendado(s) com sucesso.`);
+      setSuccessMessage(`Teste publicado agora e ${scheduledFiles.length} vídeo(s) agendado(s) com sucesso.`);
       setFiles([]);
       onCreated();
     } catch (err) {
@@ -184,8 +198,8 @@ export function BulkScheduleComposer({
         Agendamento automático em massa
       </p>
       <p className="mt-1 text-xs text-muted">
-        Escolha a conta e quantos vídeos por dia — o sistema conta os vídeos disponíveis na pasta
-        de agendados dessa conta no Drive e distribui todos nos horários escolhidos abaixo.
+        Escolha a conta e quantos vídeos por dia — o primeiro vídeo será publicado agora como
+        teste e os demais serão distribuídos nos horários escolhidos abaixo.
       </p>
 
       <div className="mt-4">
@@ -309,7 +323,7 @@ export function BulkScheduleComposer({
       {preview && (
         <div className="mt-3 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-gray-300">
           <CalendarRange size={14} className="shrink-0 text-muted" />
-          {files?.length} vídeo(s) · de {formatDateTime(preview.first)} até {formatDateTime(preview.last)}, em ~{preview.days} dia(s).
+          {files?.length} vídeo(s) · 1 teste imediato · de {formatDateTime(preview.first)} até {formatDateTime(preview.last)}, em ~{preview.days} dia(s).
         </div>
       )}
 
@@ -323,7 +337,7 @@ export function BulkScheduleComposer({
         className="mt-4 inline-flex h-9 w-full items-center justify-center gap-2 rounded-lg bg-accent text-xs font-semibold text-background disabled:cursor-not-allowed disabled:opacity-50"
       >
         {submitting && <Loader2 size={14} className="animate-spin" />}
-        {submitting && progressLabel ? progressLabel : `Agendar ${files?.length ?? 0} vídeo(s)`}
+        {submitting && progressLabel ? progressLabel : `Testar e agendar ${files?.length ?? 0} vídeo(s)`}
       </button>
     </div>
   );

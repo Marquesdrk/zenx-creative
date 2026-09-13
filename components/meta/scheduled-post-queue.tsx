@@ -55,6 +55,16 @@ export function ScheduledPostQueue({
     onChanged();
   }
 
+  const scheduledByProfile = new Map<string, { account: PublicSocialAccount; count: number }>();
+  for (const destination of accounts) {
+    if (destination.status !== "scheduled" && destination.status !== "processing") continue;
+    const account = accountsById.get(destination.socialAccountId);
+    if (!account) continue;
+    const current = scheduledByProfile.get(account.id);
+    scheduledByProfile.set(account.id, { account, count: (current?.count ?? 0) + 1 });
+  }
+  const profileSummaries = [...scheduledByProfile.values()].sort((a, b) => b.count - a.count);
+
   return (
     <aside className="rounded-xl border border-border bg-[#0d0d0d]">
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
@@ -72,6 +82,23 @@ export function ScheduledPostQueue({
           Rodar pendentes
         </button>
       </div>
+
+      {profileSummaries.length > 0 && (
+        <div className="border-b border-border px-4 py-3">
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted">Agendados por perfil</p>
+          <div className="grid grid-cols-2 gap-2">
+            {profileSummaries.map(({ account, count }) => (
+              <div key={account.id} className="rounded-lg border border-border bg-card px-2.5 py-2">
+                <p className="truncate text-[11px] text-muted">
+                  {account.username ? `@${account.username.replace(/^@/, "")}` : account.accountName}
+                </p>
+                <p className="mt-0.5 text-xl font-semibold text-accent">{count}</p>
+                <p className="text-[10px] text-muted">vídeo(s) pendente(s)</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="max-h-[680px] overflow-y-auto p-3">
         {posts.length === 0 ? (

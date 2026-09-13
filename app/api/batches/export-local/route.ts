@@ -1,23 +1,24 @@
 import { NextResponse } from "next/server";
 import { del, get } from "@vercel/blob";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { BatchItem, Profile } from "@/lib/editor/types";
 import { renderBatchItem } from "@/lib/server/render";
 import { deletePublicUrl, generatedFileUrl, generatedFolder, publicUrlToPath, sanitizeFilename } from "@/lib/server/public-files";
-import { createZip, zipArchiveFilename, zipVideoFilename } from "@/lib/server/zip";
+import { createZip, writeZipArchive, zipArchiveFilename, zipVideoFilename } from "@/lib/server/zip";
 import { socialAccountsRepo } from "@/lib/server/meta/db";
 import { uploadScheduledVideoToDrive } from "@/lib/server/google-drive";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-const MAX_PARALLEL_RENDERS = 2;
+const MAX_PARALLEL_RENDERS = 1;
 
 type ExportPayload = {
   batchId: string;
   profile: Profile;
   items: Array<BatchItem & { blobUrl?: string; blobDownloadUrl?: string; blobPathname?: string }>;
-  response?: "zip" | "video" | "drive";
+  response?: "zip" | "video" | "drive" | "stage" | "zip-staged" | "discard-staged";
   /** Obrigatório quando response = "drive" — define a pasta de destino no Drive. */
   socialAccountId?: string;
 };
@@ -103,6 +104,18 @@ export async function POST(request: Request) {
     const { payload, formData } = await parseRequest(request);
     const responseMode = payload.response ?? "zip";
 
+    if (responseMode === "discard-staged") {
+      if (process.env.VERCEL) {
+        return NextResponse.json({ error: "A limpeza em etapas está disponível apenas no modo local." }, { status: 400 });
+      }
+      const ids = payload.items.map((item) => item.id);
+      if (ids.some((id) => !/^[a-zA-Z0-9_-]+$/.test(id))) {
+        return NextResponse.json({ error: "Identificador de vídeo inválido." }, { status: 400 });
+      }
+      await Promise.all(ids.map((id) => rm(path.join(generatedFolder("renders"), `${id}.mp4`), { force: true })));
+      return NextResponse.json({ discarded: true });
+    }
+
     if ((responseMode === "video" || responseMode === "drive") && payload.items.length !== 1) {
       return NextResponse.json({ error: "A exportação individual aceita apenas um vídeo por chamada." }, { status: 400 });
     }
@@ -110,7 +123,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Informe a conta de destino no Drive." }, { status: 400 });
     }
 
-    async function renderItem(item: ExportPayload["items"][number], index: number) {
+    async function renderItem(item: ExportPayload["items"][number], index: number, keepRendered: true): Promise<{ videoFilename: string; zipFilename: string; renderedUrl: string }>;
+    async function renderItem(item: ExportPayload["items"][number], index: number, keepRendered?: false): Promise<{ videoFilename: string; zipFilename: string; content: Buffer }>;
+    async function renderItem(
+      item: ExportPayload["items"][number],
+      index: number,
+      keepRendered = false
+    ): Promise<{ videoFilename: string; zipFilename: string; renderedUrl: string } | { videoFilename: string; zipFilename: string; content: Buffer }> {
       let contentUrl: string;
 
       if (item.blobUrl) {
@@ -138,6 +157,14 @@ export async function POST(request: Request) {
         throw new Error(`${item.filename}: ${outcome.error}`);
       }
 
+      if (keepRendered) {
+        return {
+          videoFilename: zipVideoFilename(item.filename),
+          zipFilename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
+          renderedUrl: outcome.renderedUrl,
+        };
+      }
+
       temporaryUrls.push(outcome.renderedUrl);
       const renderedContent = await readFile(publicUrlToPath(outcome.renderedUrl));
 
@@ -146,6 +173,52 @@ export async function POST(request: Request) {
         zipFilename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
         content: renderedContent,
       };
+    }
+
+    if (responseMode === "stage") {
+      if (process.env.VERCEL) {
+        return NextResponse.json({ error: "A exportação em etapas está disponível apenas no modo local." }, { status: 400 });
+      }
+      if (payload.items.length !== 1) {
+        return NextResponse.json({ error: "A preparação aceita um vídeo por chamada." }, { status: 400 });
+      }
+      const staged = await renderItem(payload.items[0], 0, true);
+      return NextResponse.json({ staged: true, filename: staged.videoFilename });
+    }
+
+    if (responseMode === "zip-staged") {
+      if (process.env.VERCEL) {
+        return NextResponse.json({ error: "A montagem em etapas está disponível apenas no modo local." }, { status: 400 });
+      }
+      if (payload.items.length === 0 || payload.items.length > 0xffff) {
+        return NextResponse.json({ error: "O lote não contém uma quantidade válida de vídeos." }, { status: 400 });
+      }
+
+      const files = payload.items.map((item, index) => {
+        if (!/^[a-zA-Z0-9_-]+$/.test(item.id)) throw new Error("Identificador de vídeo inválido.");
+        return {
+          filename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
+          path: path.join(generatedFolder("renders"), `${item.id}.mp4`),
+        };
+      });
+      const token = randomUUID();
+      const archiveFilename = `${token}-${zipArchiveFilename(`lote-${payload.batchId}`)}`;
+      const downloadFilename = zipArchiveFilename(`lote-${payload.batchId}`);
+      const archivePath = path.join(generatedFolder("renders"), archiveFilename);
+      const manifestPath = path.join(generatedFolder("batch-space"), `${token}.json`);
+      try {
+        await writeZipArchive(files, archivePath);
+        await mkdir(path.dirname(manifestPath), { recursive: true });
+        await writeFile(manifestPath, JSON.stringify({ archiveFilename, filename: downloadFilename, renderedIds: payload.items.map((item) => item.id) }));
+      } catch (error) {
+        await rm(archivePath, { force: true });
+        throw error;
+      }
+
+      return NextResponse.json({
+        downloadUrl: `/api/batches/export-local/${token}/download`,
+        filename: downloadFilename,
+      });
     }
 
     if (responseMode === "video") {

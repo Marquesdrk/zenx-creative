@@ -25,6 +25,9 @@ export default function PublicarPage() {
 
   useEffect(() => {
     void (async () => {
+      // Faz o backfill das pastas das contas antigas ao entrar no fluxo de publicação.
+      // A operação é idempotente e não impede a tela de abrir se o Drive não estiver conectado.
+      await fetch("/api/meta/accounts/ensure-drive-folders", { method: "POST" }).catch(() => {});
       await refresh();
     })();
   }, [refresh]);
