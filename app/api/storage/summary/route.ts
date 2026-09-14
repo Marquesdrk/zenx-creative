@@ -52,16 +52,14 @@ async function vercelBlobBytes(): Promise<number> {
 }
 
 export async function GET() {
-  let usedBytes = 0;
   try {
-    usedBytes = process.env.VERCEL ? await vercelBlobBytes() : await localGeneratedBytes();
+    const usedBytes = process.env.VERCEL ? await vercelBlobBytes() : await localGeneratedBytes();
+    return NextResponse.json({
+      usedBytes,
+      quotaBytes: PLAN_QUOTA_BYTES,
+      usedPercent: Math.min(100, Math.round((usedBytes / PLAN_QUOTA_BYTES) * 100)),
+    });
   } catch {
-    // Sem BLOB_READ_WRITE_TOKEN configurado ou erro de leitura — mostra 0 em vez de quebrar a UI.
-    usedBytes = 0;
+    return NextResponse.json({ error: "Não foi possível consultar o armazenamento." }, { status: 503 });
   }
-  return NextResponse.json({
-    usedBytes,
-    quotaBytes: PLAN_QUOTA_BYTES,
-    usedPercent: Math.min(100, Math.round((usedBytes / PLAN_QUOTA_BYTES) * 100)),
-  });
 }

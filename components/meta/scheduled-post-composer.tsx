@@ -2,7 +2,7 @@
 
 import { upload } from "@vercel/blob/client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CalendarClock, HardDrive, Send, Upload, X } from "lucide-react";
+import { CalendarClock, ChevronDown, HardDrive, List, Send, Upload, X } from "lucide-react";
 import { BEST_TIME_SLOTS, planSchedule } from "@/lib/scheduling/plan";
 import type { PublicSocialAccount } from "@/lib/server/meta/types";
 
@@ -53,6 +53,7 @@ export function ScheduledPostComposer({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [videoFiles, setVideoFiles] = useState<File[]>([]);
+  const [showVideoFiles, setShowVideoFiles] = useState(false);
   const [driveStatus, setDriveStatus] = useState<{ configured: boolean; connected: boolean } | null>(null);
   const [useDrive, setUseDrive] = useState(true);
   const [caption, setCaption] = useState("");
@@ -94,6 +95,7 @@ export function ScheduledPostComposer({
     const files = Array.from(event.target.files ?? []);
     if (files.length === 0) return;
     setError(null);
+    setShowVideoFiles(false);
     // Aditivo: selecionar de novo soma aos já escolhidos, em vez de substituir — permite
     // juntar vídeos de pastas diferentes num único envio em massa.
     setVideoFiles((current) => [...current, ...files]);
@@ -102,6 +104,7 @@ export function ScheduledPostComposer({
 
   function removeVideoFile(index: number) {
     setVideoFiles((current) => current.filter((_, i) => i !== index));
+    if (videoFiles.length <= 1) setShowVideoFiles(false);
   }
 
   /** Sobe e agenda/publica um único vídeo — mesma lógica de sempre, extraída pra rodar em
@@ -232,6 +235,7 @@ export function ScheduledPostComposer({
     }
     if (failures.length === 0) {
       setVideoFiles([]);
+      setShowVideoFiles(false);
       setCaption("");
       setSelected(new Set());
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -263,24 +267,45 @@ export function ScheduledPostComposer({
         </label>
 
         {videoFiles.length > 0 && (
-          <ul className="mt-2 flex flex-col gap-1.5">
-            {videoFiles.map((file, index) => (
-              <li
-                key={`${file.name}-${index}`}
-                className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-gray-200"
+          <>
+            <div className="mt-2 flex items-center justify-between gap-2 text-xs">
+              <span className="font-medium text-gray-300">
+                {videoFiles.length} {videoFiles.length === 1 ? "vídeo" : "vídeos"} selecionados
+              </span>
+              <button
+                type="button"
+                aria-label={showVideoFiles ? "Ocultar vídeos selecionados" : "Ver vídeos selecionados"}
+                aria-expanded={showVideoFiles}
+                aria-controls="selected-video-files"
+                title={showVideoFiles ? "Ocultar vídeos" : "Ver vídeos"}
+                onClick={() => setShowVideoFiles((visible) => !visible)}
+                className="inline-flex h-7 w-7 items-center justify-center gap-1 rounded-md text-muted hover:bg-card-hover hover:text-foreground"
               >
-                <span className="min-w-0 truncate">{file.name}</span>
-                <button
-                  type="button"
-                  aria-label={`Remover ${file.name}`}
-                  onClick={() => removeVideoFile(index)}
-                  className="shrink-0 text-muted hover:text-red-300"
-                >
-                  <X size={13} />
-                </button>
-              </li>
-            ))}
-          </ul>
+                <List size={15} />
+                <ChevronDown size={13} className={showVideoFiles ? "rotate-180 transition-transform" : "transition-transform"} />
+              </button>
+            </div>
+            {showVideoFiles && (
+              <ul id="selected-video-files" className="mt-2 flex max-h-48 flex-col gap-1.5 overflow-y-auto">
+                {videoFiles.map((file, index) => (
+                  <li
+                    key={`${file.name}-${index}`}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-gray-200"
+                  >
+                    <span className="min-w-0 truncate">{file.name}</span>
+                    <button
+                      type="button"
+                      aria-label={`Remover ${file.name}`}
+                      onClick={() => removeVideoFile(index)}
+                      className="shrink-0 text-muted hover:text-red-300"
+                    >
+                      <X size={13} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
         )}
 
         {driveStatus?.configured && (

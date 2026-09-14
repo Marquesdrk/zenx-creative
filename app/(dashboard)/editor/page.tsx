@@ -31,9 +31,15 @@ function generateCaption(filename: string, profile: Profile) {
 async function responseErrorMessage(res: Response, fallback: string) {
   const contentType = res.headers.get("content-type") ?? "";
   const text = await res.text();
+  const explain = (message: string) => {
+    if (/4294967268|ENOSPC|no space left on device|disk full/i.test(message)) {
+      return "O disco ficou sem espaço durante a conversão. Libere espaço no computador e tente novamente, ou use Enviar ao Drive para processar um vídeo por vez.";
+    }
+    return message;
+  };
   if (contentType.includes("application/json")) {
     try {
-      return (JSON.parse(text) as { error?: string }).error ?? fallback;
+      return explain((JSON.parse(text) as { error?: string }).error ?? fallback);
     } catch {
       return fallback;
     }
@@ -41,7 +47,12 @@ async function responseErrorMessage(res: Response, fallback: string) {
   if (text.trim().startsWith("<!DOCTYPE") || text.trim().startsWith("<html")) {
     return `${fallback} A Vercel recusou a requisição antes do render.`;
   }
-  return text || fallback;
+  return explain(text || fallback);
+}
+
+function formatBytes(bytes: number) {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+  return `${Math.ceil(bytes / 1024 ** 2)} MB`;
 }
 
 async function mapWithConcurrency<T, R>(
@@ -248,6 +259,25 @@ export default function EditorPage() {
     if (missingFiles.length > 0) {
       setPageError("Um ou mais arquivos originais não estão mais disponíveis. Crie um novo lote e exporte sem recarregar a página.");
       return;
+    }
+
+    if (!IS_VERCEL) {
+      try {
+        const diskResponse = await fetch("/api/batches/disk-space", { cache: "no-store" });
+        if (!diskResponse.ok) throw new Error("Não foi possível verificar o espaço livre antes de exportar.");
+        const { freeBytes } = (await diskResponse.json()) as { freeBytes: number };
+        const inputBytes = batchItems.reduce((total, item) => total + (fileRefs.current.get(item.id)?.size ?? 0), 0);
+        const estimatedBytes = Math.ceil(inputBytes * 2 + 512 * 1024 ** 2);
+        if (freeBytes < estimatedBytes) {
+          setPageError(
+            `Espaço insuficiente para exportar o lote: há ${formatBytes(freeBytes)} livres e a estimativa é ${formatBytes(estimatedBytes)} (vídeos renderizados + ZIP, com reserva). Libere espaço ou use “Enviar ao Drive” para processar um vídeo por vez.`
+          );
+          return;
+        }
+      } catch (error) {
+        setPageError(error instanceof Error ? error.message : "Não foi possível verificar o espaço livre antes de exportar.");
+        return;
+      }
     }
 
     setExportingBatchId(batchId);

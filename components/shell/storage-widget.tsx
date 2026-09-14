@@ -3,21 +3,76 @@
 import { useEffect, useState } from "react";
 
 type StorageSummary = { usedBytes: number; quotaBytes: number; usedPercent: number };
+type CachedStorageSummary = { savedAt: number; summary: StorageSummary };
+
+const CACHE_KEY = "zenx-storage-summary-v1";
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 function formatGb(bytes: number): string {
   return (bytes / 1024 ** 3).toFixed(1);
+}
+
+function readCachedSummary(): CachedStorageSummary | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "null") as CachedStorageSummary | null;
+    if (
+      !value ||
+      typeof value.savedAt !== "number" ||
+      typeof value.summary?.usedBytes !== "number" ||
+      typeof value.summary?.quotaBytes !== "number" ||
+      typeof value.summary?.usedPercent !== "number"
+    ) {
+      return null;
+    }
+    return value;
+  } catch {
+    return null;
+  }
 }
 
 /** Uso real de armazenamento do Zenx (renders/uploads/lotes — Vercel Blob em produção, disco
  *  local em dev). Nunca inclui o Google Drive do usuário, que é uma conta separada dele. */
 export function StorageWidget() {
   const [summary, setSummary] = useState<StorageSummary | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   useEffect(() => {
+    const cached = readCachedSummary();
+    let cancelled = false;
+
+    if (cached) {
+      Promise.resolve().then(() => {
+        if (!cancelled) setSummary(cached.summary);
+      });
+    }
+
+    if (cached && Date.now() - cached.savedAt < CACHE_TTL_MS) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
     fetch("/api/storage/summary")
-      .then((res) => res.json())
-      .then(setSummary)
-      .catch(() => setSummary({ usedBytes: 0, quotaBytes: 50 * 1024 ** 3, usedPercent: 0 }));
+      .then((res) => {
+        if (!res.ok) throw new Error("Falha ao consultar armazenamento.");
+        return res.json() as Promise<StorageSummary>;
+      })
+      .then((nextSummary) => {
+        if (cancelled) return;
+        setSummary(nextSummary);
+        try {
+          localStorage.setItem(CACHE_KEY, JSON.stringify({ savedAt: Date.now(), summary: nextSummary }));
+        } catch {
+          // A contagem continua funcionando mesmo se o navegador bloquear o armazenamento local.
+        }
+      })
+      .catch(() => {
+        if (!cancelled && !cached) setLoadFailed(true);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const percent = summary?.usedPercent ?? 0;
@@ -37,7 +92,7 @@ export function StorageWidget() {
         />
       </div>
       <div className="mt-3 flex justify-between text-[11px] text-muted">
-        <span>{summary ? `${percent}% utilizado` : "Carregando…"}</span>
+        <span>{summary ? `${percent}% utilizado` : loadFailed ? "Indisponível" : "Carregando…"}</span>
         <span>
           {usedGb} GB / {quotaGb} GB
         </span>
