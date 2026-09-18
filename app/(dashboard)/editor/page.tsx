@@ -1,9 +1,10 @@
 "use client";
 
 import { upload } from "@vercel/blob/client";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { CalendarDays, CheckCircle2, Folder, Inbox, PlayCircle } from "lucide-react";
 import { BatchModal, type BatchSourceFile } from "@/components/editor/batch-modal";
+import { useBatchDrafts } from "@/components/editor/batch-drafts-provider";
 import { EditDrawer } from "@/components/editor/edit-drawer";
 import { SendToDriveModal } from "@/components/editor/send-to-drive-modal";
 import { VideoGrid } from "@/components/editor/video-grid";
@@ -17,8 +18,10 @@ import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
 import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
 
-// Keep at most two FFmpeg jobs active; each is independently limited to two threads.
-const MAX_PARALLEL_RENDERS = 1;
+// Use up to half the logical CPUs (2 FFmpeg threads per job), capped at two jobs,
+// to improve batch throughput without starving the rest of the computer.
+const logicalCpuCount = typeof navigator === "undefined" ? 4 : navigator.hardwareConcurrency || 4;
+const MAX_PARALLEL_RENDERS = Math.max(1, Math.min(2, Math.floor(logicalCpuCount / 4)));
 
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
@@ -130,8 +133,7 @@ async function sendExportRequest(params: {
 export default function EditorPage() {
   const [profiles] = useProfiles();
   const [templates] = useTemplates();
-  const [batches, setBatches] = useState<Batch[]>([]);
-  const [items, setItems] = useState<BatchItem[]>([]);
+  const { batches, setBatches, items, setItems, fileRefs, objectUrlRefs } = useBatchDrafts();
   const [isBatchModalOpen, setBatchModalOpen] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
@@ -141,25 +143,12 @@ export default function EditorPage() {
   const [sendingToDriveBatchId, setSendingToDriveBatchId] = useState<string | null>(null);
   const [sendToDriveProgressLabel, setSendToDriveProgressLabel] = useState<string | null>(null);
   const [sendToDriveError, setSendToDriveError] = useState<string | null>(null);
-  const fileRefs = useRef(new Map<string, File>());
-  const objectUrlRefs = useRef(new Set<string>());
-
-  useEffect(() => {
-    const objectUrls = objectUrlRefs.current;
-    const files = fileRefs.current;
-    return () => {
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
-      objectUrls.clear();
-      files.clear();
-    };
-  }, []);
-
   function removeLocalItemFiles(item: BatchItem) {
     if (item.contentUrl?.startsWith("blob:")) {
       URL.revokeObjectURL(item.contentUrl);
-      objectUrlRefs.current.delete(item.contentUrl);
+      objectUrlRefs.delete(item.contentUrl);
     }
-    fileRefs.current.delete(item.id);
+    fileRefs.delete(item.id);
   }
 
   async function handleBatchSubmit(params: { profileId: string; files: BatchSourceFile[] }) {
@@ -188,8 +177,8 @@ export default function EditorPage() {
     const createdItems: BatchItem[] = params.files.map(({ name, file }, index) => {
       const itemId = crypto.randomUUID();
       const contentUrl = file ? URL.createObjectURL(file) : null;
-      if (file) fileRefs.current.set(itemId, file);
-      if (contentUrl) objectUrlRefs.current.add(contentUrl);
+      if (file) fileRefs.set(itemId, file);
+      if (contentUrl) objectUrlRefs.add(contentUrl);
 
       return {
         id: itemId,
@@ -255,7 +244,7 @@ export default function EditorPage() {
     const batchItems = items.filter((item) => item.batchId === batchId);
     if (!batch || !profile || batchItems.length === 0) return;
 
-    const missingFiles = batchItems.filter((item) => !fileRefs.current.has(item.id));
+    const missingFiles = batchItems.filter((item) => !fileRefs.has(item.id));
     if (missingFiles.length > 0) {
       setPageError("Um ou mais arquivos originais não estão mais disponíveis. Crie um novo lote e exporte sem recarregar a página.");
       return;
@@ -266,7 +255,7 @@ export default function EditorPage() {
         const diskResponse = await fetch("/api/batches/disk-space", { cache: "no-store" });
         if (!diskResponse.ok) throw new Error("Não foi possível verificar o espaço livre antes de exportar.");
         const { freeBytes } = (await diskResponse.json()) as { freeBytes: number };
-        const inputBytes = batchItems.reduce((total, item) => total + (fileRefs.current.get(item.id)?.size ?? 0), 0);
+        const inputBytes = batchItems.reduce((total, item) => total + (fileRefs.get(item.id)?.size ?? 0), 0);
         const estimatedBytes = Math.ceil(inputBytes * 2 + 512 * 1024 ** 2);
         if (freeBytes < estimatedBytes) {
           setPageError(
@@ -293,7 +282,7 @@ export default function EditorPage() {
           batchItems.map((item, index) => ({ item, index })),
           MAX_PARALLEL_RENDERS,
           async ({ item, index }) => {
-            const file = fileRefs.current.get(item.id);
+            const file = fileRefs.get(item.id);
             if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
 
             const res = await sendExportRequest({ batchId, profile, response: "video", item, file });
@@ -325,7 +314,7 @@ export default function EditorPage() {
       } else {
         let rendered = 0;
         await mapWithConcurrency(batchItems, MAX_PARALLEL_RENDERS, async (item) => {
-          const file = fileRefs.current.get(item.id);
+          const file = fileRefs.get(item.id);
           if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
 
           const res = await sendExportRequest({ batchId, profile, response: "stage", item, file });
@@ -396,7 +385,7 @@ export default function EditorPage() {
     const batchItems = items.filter((item) => item.batchId === batchId);
     if (!batch || !profile || batchItems.length === 0) return;
 
-    const missingFiles = batchItems.filter((item) => !fileRefs.current.has(item.id));
+    const missingFiles = batchItems.filter((item) => !fileRefs.has(item.id));
     if (missingFiles.length > 0) {
       setSendToDriveError("Um ou mais arquivos originais não estão mais disponíveis. Crie um novo lote sem recarregar a página.");
       return;
@@ -408,7 +397,7 @@ export default function EditorPage() {
     try {
       let sent = 0;
       await mapWithConcurrency(batchItems, MAX_PARALLEL_RENDERS, async (item) => {
-        const file = fileRefs.current.get(item.id);
+        const file = fileRefs.get(item.id);
         if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
 
         const res = await sendExportRequest({ batchId, profile, response: "drive", socialAccountId, item, file });

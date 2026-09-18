@@ -5,8 +5,9 @@ import ffmpeg from "fluent-ffmpeg";
 import * as PImage from "pureimage";
 import { get } from "@vercel/blob";
 import { createHash } from "node:crypto";
+import { execFile } from "node:child_process";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import os from "node:os";
 import path from "node:path";
@@ -35,6 +36,15 @@ const ROTATE_FILTERS: Record<number, string[]> = {
 const ENCODE_THREADS = Math.max(1, Math.min(2, Math.floor(os.cpus().length * 0.5)));
 const PING_PONG_CACHE_DIR = path.join(os.tmpdir(), "zenx-reaction-cache");
 const pingPongReactionCache = new Map<string, Promise<string>>();
+const PROFILE_MEDIA_CACHE_DIR = path.join(os.tmpdir(), `zenx-profile-media-${process.pid}`);
+const MAX_PROFILE_MEDIA_CACHE_ENTRIES = 3;
+type CachedProfileMedia = { path: string; cleanup: false; cacheKey: string };
+const profileMediaCache = new Map<
+  string,
+  { promise: Promise<{ path: string } | null>; activeUsers: number; lastUsedAt: number }
+>();
+let nvencAvailablePromise: Promise<boolean> | null = null;
+let nvencDisabled = false;
 
 const FALLBACK_TEXT_FONT_PATH = path.join(process.cwd(), "assets", "fonts", "arialbd.ttf");
 const RENDER_FONT_PATHS = {
@@ -123,7 +133,7 @@ async function materializeDataUrl(url: string) {
   return { path: filePath, cleanup: true };
 }
 
-async function materializeMediaUrl(url: string) {
+async function materializeMediaUrlUncached(url: string) {
   if (isDataUrl(url)) return materializeDataUrl(url);
 
   const driveMediaMatch = url.match(/^\/api\/drive\/(?:media|stream)\/([^/?#]+)/i);
@@ -155,8 +165,79 @@ async function materializeMediaUrl(url: string) {
   return { path: filePath, cleanup: true };
 }
 
-async function cleanupMaterializedMedia(media: { path: string; cleanup: boolean } | null) {
-  if (media?.cleanup) await rm(media.path, { force: true });
+async function materializeMediaUrl(url: string): Promise<CachedProfileMedia | { path: string; cleanup: boolean } | null> {
+  // Profile media is shared by every video in a batch. Keep a few remote assets on disk
+  // while rendering so 100–500 items don't download the same reaction video repeatedly.
+  const isDriveMediaUrl = /^\/api\/drive\/(?:media|stream)\//i.test(url);
+  if (!isDriveMediaUrl && !isRemoteUrl(url) && !isDataUrl(url)) {
+    return materializeMediaUrlUncached(url);
+  }
+
+  const cacheKey = createHash("sha256").update(url).digest("hex");
+  let entry = profileMediaCache.get(cacheKey);
+  if (!entry) {
+    const promise = (async () => {
+      const media = await materializeMediaUrlUncached(url);
+      if (!media) return null;
+      await mkdir(PROFILE_MEDIA_CACHE_DIR, { recursive: true });
+      const extension = path.extname(media.path) || ".bin";
+      const cachedPath = path.join(PROFILE_MEDIA_CACHE_DIR, `${cacheKey}${extension}`);
+      try {
+        await copyFile(media.path, cachedPath);
+        await rm(media.path, { force: true });
+      } catch (error) {
+        await rm(media.path, { force: true });
+        await rm(cachedPath, { force: true });
+        throw error;
+      }
+      return { path: cachedPath };
+    })();
+    entry = { promise, activeUsers: 0, lastUsedAt: Date.now() };
+    profileMediaCache.set(cacheKey, entry);
+  }
+
+  entry.activeUsers += 1;
+  entry.lastUsedAt = Date.now();
+  try {
+    const media = await entry.promise;
+    if (!media) {
+      profileMediaCache.delete(cacheKey);
+      return null;
+    }
+    return { ...media, cleanup: false, cacheKey };
+  } catch (error) {
+    entry.activeUsers = Math.max(0, entry.activeUsers - 1);
+    profileMediaCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+async function trimProfileMediaCache() {
+  while (profileMediaCache.size > MAX_PROFILE_MEDIA_CACHE_ENTRIES) {
+    const candidates = [...profileMediaCache.entries()]
+      .filter(([, entry]) => entry.activeUsers === 0)
+      .sort((left, right) => left[1].lastUsedAt - right[1].lastUsedAt);
+    const oldest = candidates[0];
+    if (!oldest) return;
+    const [key, entry] = oldest;
+    profileMediaCache.delete(key);
+    const media = await entry.promise.catch(() => null);
+    if (media) await rm(media.path, { force: true });
+  }
+}
+
+async function cleanupMaterializedMedia(media: (CachedProfileMedia | { path: string; cleanup: boolean }) | null) {
+  if (!media) return;
+  if ("cacheKey" in media) {
+    const entry = profileMediaCache.get(media.cacheKey);
+    if (entry) {
+      entry.activeUsers = Math.max(0, entry.activeUsers - 1);
+      entry.lastUsedAt = Date.now();
+      await trimProfileMediaCache();
+    }
+  } else if (media.cleanup) {
+    await rm(media.path, { force: true });
+  }
 }
 
 function xStyleBackgroundCandidates(profile: Profile) {
@@ -230,7 +311,34 @@ function buildContentFilters(
   return filters;
 }
 
-function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: string[], outputPath: string, item: BatchItem) {
+function supportsNvenc() {
+  if (nvencDisabled || !ffmpegStatic) return Promise.resolve(false);
+  if (nvencAvailablePromise) return nvencAvailablePromise;
+  const ffmpegPath = ffmpegStatic;
+
+  nvencAvailablePromise = new Promise<boolean>((resolve) => {
+    execFile(ffmpegPath, [
+      "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i",
+      "color=c=black:s=1080x1920:d=0.1", "-frames:v", "1", "-c:v", "h264_nvenc", "-f", "null", "-",
+    ], { windowsHide: true, timeout: 15_000, maxBuffer: 1024 * 1024 }, (error) => resolve(!error));
+  });
+
+  return nvencAvailablePromise;
+}
+
+function encoderOptions(useNvenc: boolean) {
+  return useNvenc
+    ? ["-c:v", "h264_nvenc", "-preset", "p2", "-rc", "vbr", "-cq", "27", "-b:v", "0"]
+    : ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "27", "-threads", String(ENCODE_THREADS)];
+}
+
+function runOnce(
+  inputs: Array<{ path: string; options?: string[] }>,
+  filterGraph: string[],
+  outputPath: string,
+  item: BatchItem,
+  useNvenc: boolean
+) {
   return new Promise<void>((resolve, reject) => {
     const command = ffmpeg();
     const stderr: string[] = [];
@@ -246,14 +354,7 @@ function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: s
     outputOptions.push(
       "-filter_complex_threads",
       "1",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "ultrafast",
-      "-crf",
-      "27",
-      "-threads",
-      String(ENCODE_THREADS),
+      ...encoderOptions(useNvenc),
       "-pix_fmt",
       "yuv420p",
       "-c:a",
@@ -279,8 +380,8 @@ function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: s
 
 /** Cria uma sequência finita frente + trás para repetir a reação sem o salto
  * brusco do último quadro de volta para o primeiro. */
-function createPingPongReaction(inputPath: string, outputPath: string, targetWidth: number, targetHeight: number) {
-  return new Promise<void>((resolve, reject) => {
+async function createPingPongReaction(inputPath: string, outputPath: string, targetWidth: number, targetHeight: number) {
+  const renderOnce = (useNvenc: boolean) => new Promise<void>((resolve, reject) => {
     const command = ffmpeg(inputPath);
     const stderr: string[] = [];
     command
@@ -296,14 +397,7 @@ function createPingPongReaction(inputPath: string, outputPath: string, targetWid
         "-filter_complex_threads",
         "1",
         "-an",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "ultrafast",
-        "-crf",
-        "28",
-        "-threads",
-        String(ENCODE_THREADS),
+        ...encoderOptions(useNvenc),
         "-pix_fmt",
         "yuv420p",
         "-movflags",
@@ -317,6 +411,36 @@ function createPingPongReaction(inputPath: string, outputPath: string, targetWid
       .on("end", () => resolve())
       .save(outputPath);
   });
+
+  if (!(await supportsNvenc())) {
+    await renderOnce(false);
+    return;
+  }
+  try {
+    await renderOnce(true);
+  } catch (error) {
+    console.warn("[render] NVENC falhou ao preparar o loop; repetindo com codificação por CPU", error);
+    nvencDisabled = true;
+    await rm(outputPath, { force: true });
+    await renderOnce(false);
+  }
+}
+
+async function run(inputs: Array<{ path: string; options?: string[] }>, filterGraph: string[], outputPath: string, item: BatchItem) {
+  if (!(await supportsNvenc())) {
+    await runOnce(inputs, filterGraph, outputPath, item, false);
+    return;
+  }
+
+  try {
+    await runOnce(inputs, filterGraph, outputPath, item, true);
+  } catch (error) {
+    // Retry transparently if an encoder/driver failure occurs after the probe succeeded.
+    console.warn("[render] NVENC falhou; repetindo este vídeo com codificação por CPU", error);
+    nvencDisabled = true;
+    await rm(outputPath, { force: true });
+    await runOnce(inputs, filterGraph, outputPath, item, false);
+  }
 }
 
 async function getPingPongReactionPath(
