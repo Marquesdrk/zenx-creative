@@ -10,7 +10,9 @@ export const maxDuration = 60;
  */
 function assertAuthorized(request: Request) {
   const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return null;
+  if (!secret) {
+    return NextResponse.json({ error: "CRON_SECRET não configurado." }, { status: 503 });
+  }
   const auth = request.headers.get("authorization");
   if (auth !== `Bearer ${secret}`) {
     return NextResponse.json({ error: "Não autorizado." }, { status: 401 });
