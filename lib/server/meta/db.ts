@@ -22,8 +22,18 @@ import type {
 // NÃO são da integração Meta (perfis/templates/lotes do editor) continuam em SQLite local
 // (lib/server/db.ts) — a migração aqui é escopada só ao que este arquivo cobre.
 
-function throwIfError<T>(data: T, error: { message: string } | null): T {
-  if (error) throw new Error(`Supabase: ${error.message}`);
+function throwIfError<T>(
+  data: T,
+  error: { message: string; details?: string | null; hint?: string | null; code?: string | null } | null,
+): T {
+  if (error) {
+    // PostgREST transforma falhas de rede em `message: "TypeError: fetch failed"` e guarda
+    // a causa real (DNS/TLS/socket) em `details`. Preservá-la é essencial para diagnosticar
+    // o disparador sem confundir indisponibilidade de rede com erro de publicação.
+    const cause = error.details?.match(/Caused by: ([^\r\n]+)/)?.[1];
+    const suffix = [cause, error.code, error.hint].filter(Boolean).join(" | ");
+    throw new Error(`Supabase: ${error.message}${suffix ? ` (${suffix})` : ""}`);
+  }
   return data;
 }
 
@@ -225,6 +235,7 @@ type ScheduledPostRow = {
   video_source: string;
   drive_file_id: string | null;
   drive_file_name: string | null;
+  cover_url: string | null;
   caption: string;
   scheduled_at: string | null;
   status: string;
@@ -240,6 +251,7 @@ function scheduledPostFromRow(row: ScheduledPostRow): ScheduledPost {
     videoSource: row.video_source as ScheduledPostVideoSource,
     driveFileId: row.drive_file_id,
     driveFileName: row.drive_file_name,
+    coverUrl: row.cover_url,
     caption: row.caption,
     scheduledAt: row.scheduled_at,
     status: row.status as ScheduledPostStatus,
@@ -271,6 +283,7 @@ export const scheduledPostsRepo = {
       video_source: post.videoSource,
       drive_file_id: post.driveFileId,
       drive_file_name: post.driveFileName,
+      cover_url: post.coverUrl,
       caption: post.caption,
       scheduled_at: post.scheduledAt,
       status: post.status,
@@ -323,6 +336,7 @@ type ScheduledPostAccountRow = {
   scheduled_post_id: string;
   social_account_id: string;
   status: string;
+  media_container_id: string | null;
   external_post_id: string | null;
   error_code: string | null;
   error_message: string | null;
@@ -340,6 +354,7 @@ function scheduledPostAccountFromRow(row: ScheduledPostAccountRow): ScheduledPos
     scheduledPostId: row.scheduled_post_id,
     socialAccountId: row.social_account_id,
     status: row.status as ScheduledPostAccountStatus,
+    mediaContainerId: row.media_container_id,
     externalPostId: row.external_post_id,
     errorCode: row.error_code,
     errorMessage: row.error_message,
@@ -386,6 +401,7 @@ export const scheduledPostAccountsRepo = {
       scheduled_post_id: row.scheduledPostId,
       social_account_id: row.socialAccountId,
       status: row.status,
+      media_container_id: row.mediaContainerId,
       external_post_id: row.externalPostId,
       error_code: row.errorCode,
       error_message: row.errorMessage,
@@ -416,29 +432,51 @@ export const scheduledPostAccountsRepo = {
 
   async listDue(nowIso: string): Promise<ScheduledPostAccount[]> {
     // Supabase/PostgREST não faz JOIN direto por aqui — busca os posts "due" primeiro e filtra
-    // os destinos "scheduled" por post_id (bases de 30-100 contas nunca chegam perto do limite
-    // de IN() do Postgres).
-    const { data: duePosts, error: postsError } = await getSupabaseAdmin()
-      .from("scheduled_posts")
-      .select("id")
-      .or(`scheduled_at.is.null,scheduled_at.lte.${nowIso}`);
-    throwIfError(duePosts, postsError);
-    const postIds = (duePosts ?? []).map((p: { id: string }) => p.id);
+    // os destinos "scheduled" por post_id. Considera só posts agregados ainda ativos e divide
+    // os IDs em blocos: incluir posts concluídos gerava filtros `IN` de dezenas de milhares de
+    // caracteres, acima do limite de cabeçalhos do fetch usado pelo Supabase.
+    const postIds: string[] = [];
+    const postPageSize = 500;
+    for (let offset = 0; ; offset += postPageSize) {
+      const { data: duePosts, error: postsError } = await getSupabaseAdmin()
+        .from("scheduled_posts")
+        .select("id")
+        .in("status", ["scheduled", "processing"])
+        .or(`scheduled_at.is.null,scheduled_at.lte.${nowIso}`)
+        .range(offset, offset + postPageSize - 1);
+      throwIfError(duePosts, postsError);
+      const page = (duePosts ?? []).map((post: { id: string }) => post.id);
+      postIds.push(...page);
+      if (page.length < postPageSize) break;
+    }
     if (postIds.length === 0) return [];
 
-    const { data, error } = await getSupabaseAdmin()
-      .from("scheduled_post_accounts")
-      .select("*")
-      .eq("status", "scheduled")
-      .in("scheduled_post_id", postIds)
-      .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`);
-    return throwIfError(data ?? [], error).map((row) => scheduledPostAccountFromRow(row as ScheduledPostAccountRow));
+    const postIdChunkSize = 50;
+    const accountPageSize = 500;
+    const dueAccounts: ScheduledPostAccountRow[] = [];
+    for (let chunkStart = 0; chunkStart < postIds.length; chunkStart += postIdChunkSize) {
+      const chunk = postIds.slice(chunkStart, chunkStart + postIdChunkSize);
+      for (let offset = 0; ; offset += accountPageSize) {
+        const { data, error } = await getSupabaseAdmin()
+          .from("scheduled_post_accounts")
+          .select("*")
+          .eq("status", "scheduled")
+          .in("scheduled_post_id", chunk)
+          .or(`next_attempt_at.is.null,next_attempt_at.lte.${nowIso}`)
+          .range(offset, offset + accountPageSize - 1);
+        const page = throwIfError(data ?? [], error) as ScheduledPostAccountRow[];
+        dueAccounts.push(...page);
+        if (page.length < accountPageSize) break;
+      }
+    }
+    return dueAccounts.map((row) => scheduledPostAccountFromRow(row));
   },
 
   async updateResult(
     id: string,
     patch: Partial<{
       status: ScheduledPostAccountStatus;
+      mediaContainerId: string | null;
       externalPostId: string | null;
       errorCode: string | null;
       errorMessage: string | null;
@@ -452,6 +490,7 @@ export const scheduledPostAccountsRepo = {
       .from("scheduled_post_accounts")
       .update({
         ...(patch.status !== undefined ? { status: patch.status } : {}),
+        ...(patch.mediaContainerId !== undefined ? { media_container_id: patch.mediaContainerId } : {}),
         ...(patch.externalPostId !== undefined ? { external_post_id: patch.externalPostId } : {}),
         ...(patch.errorCode !== undefined ? { error_code: patch.errorCode } : {}),
         ...(patch.errorMessage !== undefined ? { error_message: patch.errorMessage } : {}),

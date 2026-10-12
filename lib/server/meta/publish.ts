@@ -3,7 +3,12 @@ import { publicationLogsRepo, scheduledPostAccountsRepo, scheduledPostsRepo, soc
 import { publishFacebookReel } from "./facebook";
 import { MetaGraphError, MetaNetworkError } from "./graph-client";
 import { INSTAGRAM_GRAPH_BASE } from "./config";
-import { publishInstagramReel } from "./instagram";
+import {
+  createReelContainer,
+  getReelContainerStatus,
+  publishInstagramReel,
+  publishReelContainer,
+} from "./instagram";
 import { logMetaApiError, logMetaStep } from "./log";
 import { resolvePostVideoUrl } from "./video-source";
 
@@ -37,7 +42,10 @@ function classifyError(err: unknown): ClassifiedError {
  *  Nunca lança: toda falha vira 'failed' (ou volta pra 'scheduled' com retry agendado, se for
  *  recuperável) + um registro em publication_logs, para que um erro numa conta nunca afete o
  *  processamento das demais contas do mesmo post. */
-export async function processScheduledPostAccount(scheduledPostAccountId: string): Promise<void> {
+export async function processScheduledPostAccount(
+  scheduledPostAccountId: string,
+  options: { deferInstagramProcessing?: boolean } = { deferInstagramProcessing: true },
+): Promise<void> {
   const claimed = await scheduledPostAccountsRepo.claim(scheduledPostAccountId);
   if (!claimed) return;
 
@@ -80,7 +88,7 @@ export async function processScheduledPostAccount(scheduledPostAccountId: string
 
   try {
     const videoUrl = resolvePostVideoUrl(post);
-    const externalId = await publishToAccount({
+    const outcome = await publishToAccount({
       platform: account.platform,
       socialAccountId: account.id,
       accessToken,
@@ -89,11 +97,28 @@ export async function processScheduledPostAccount(scheduledPostAccountId: string
       authFlow: typeof account.metadata.authFlow === "string" ? account.metadata.authFlow : undefined,
       videoUrl,
       caption: post.caption,
+      coverUrl: post.coverUrl ?? null,
+      mediaContainerId: spa.mediaContainerId,
+      deferInstagramProcessing: options.deferInstagramProcessing ?? true,
     });
+
+    if (outcome.kind === "waiting") {
+      await scheduledPostAccountsRepo.updateResult(spa.id, {
+        status: "scheduled",
+        mediaContainerId: outcome.mediaContainerId,
+        nextAttemptAt: new Date(Date.now() + 60_000).toISOString(),
+        errorCode: null,
+        errorMessage: null,
+        recoverable: null,
+      });
+      await scheduledPostsRepo.syncStatusFromAccounts(post.id);
+      return;
+    }
 
     await scheduledPostAccountsRepo.updateResult(spa.id, {
       status: "published",
-      externalPostId: externalId,
+      mediaContainerId: null,
+      externalPostId: outcome.externalId,
       errorCode: null,
       errorMessage: null,
       recoverable: null,
@@ -108,7 +133,7 @@ export async function processScheduledPostAccount(scheduledPostAccountId: string
       platform: account.platform,
       action: "publish_attempt",
       status: "success",
-      externalPostId: externalId,
+      externalPostId: outcome.externalId,
       errorCode: null,
       errorMessage: null,
       metadata: {},
@@ -196,21 +221,74 @@ async function publishToAccount(params: {
   authFlow?: string;
   videoUrl: string;
   caption: string;
-}): Promise<string> {
+  coverUrl: string | null;
+  mediaContainerId: string | null;
+  deferInstagramProcessing: boolean;
+}): Promise<{ kind: "waiting"; mediaContainerId: string } | { kind: "published"; externalId: string }> {
   if (params.platform === "INSTAGRAM") {
     if (!params.instagramUserId) throw new Error("Conta Instagram sem instagram_user_id salvo — reconecte a conta.");
+    const graphBase = params.authFlow === "instagram_login" ? INSTAGRAM_GRAPH_BASE : undefined;
+
+    if (params.deferInstagramProcessing) {
+      if (!params.mediaContainerId) {
+        const mediaContainerId = await createReelContainer({
+          instagramUserId: params.instagramUserId,
+          accessToken: params.accessToken,
+          videoUrl: params.videoUrl,
+          caption: params.caption,
+          coverUrl: params.coverUrl ?? undefined,
+          graphBase,
+        });
+        logMetaStep("META_MEDIA_CONTAINER_CREATED", {
+          socialAccountId: params.socialAccountId,
+          metadata: { containerId: mediaContainerId, platform: "INSTAGRAM" },
+        });
+        return { kind: "waiting", mediaContainerId };
+      }
+
+      const container = await getReelContainerStatus(params.mediaContainerId, params.accessToken, graphBase);
+      if (container.statusCode === "IN_PROGRESS") {
+        logMetaStep("META_MEDIA_PROCESSING", {
+          socialAccountId: params.socialAccountId,
+          metadata: { containerId: params.mediaContainerId },
+        });
+        return { kind: "waiting", mediaContainerId: params.mediaContainerId };
+      }
+      if (container.statusCode === "ERROR") {
+        throw new Error(container.status?.trim()
+          ? `O Instagram não conseguiu processar o Reel: ${container.status}`
+          : "O Instagram reportou erro ao processar o Reel (status ERROR).");
+      }
+      if (container.statusCode === "EXPIRED") {
+        throw new Error("O container do Reel expirou antes de ser publicado (mais de 24h em processamento).");
+      }
+
+      const externalId = await publishReelContainer({
+        instagramUserId: params.instagramUserId,
+        accessToken: params.accessToken,
+        creationId: params.mediaContainerId,
+        graphBase,
+      });
+      logMetaStep("META_MEDIA_PUBLISHED", {
+        socialAccountId: params.socialAccountId,
+        metadata: { mediaId: externalId, platform: "INSTAGRAM" },
+      });
+      return { kind: "published", externalId };
+    }
+
     const result = await publishInstagramReel({
       instagramUserId: params.instagramUserId,
       accessToken: params.accessToken,
       videoUrl: params.videoUrl,
       caption: params.caption,
+      coverUrl: params.coverUrl ?? undefined,
       // Contas conectadas via "Instagram Login" usam tokens do host graph.instagram.com —
       // nunca funcionam contra graph.facebook.com (host das contas conectadas via Página).
-      graphBase: params.authFlow === "instagram_login" ? INSTAGRAM_GRAPH_BASE : undefined,
+      graphBase,
       onEvent: (step, metadata) => logMetaStep(step, { socialAccountId: params.socialAccountId, metadata }),
     });
     logMetaStep("META_MEDIA_PUBLISHED", { socialAccountId: params.socialAccountId, metadata: { mediaId: result.externalId, platform: "INSTAGRAM" } });
-    return result.externalId;
+    return { kind: "published", externalId: result.externalId };
   }
   if (!params.pageId) throw new Error("Conta Facebook sem page_id salvo — reconecte a conta.");
   const result = await publishFacebookReel({
@@ -221,7 +299,7 @@ async function publishToAccount(params: {
     onEvent: (step, metadata) => logMetaStep(step, { socialAccountId: params.socialAccountId, metadata }),
   });
   logMetaStep("META_MEDIA_PUBLISHED", { socialAccountId: params.socialAccountId, metadata: { videoId: result.externalId, platform: "FACEBOOK" } });
-  return result.externalId;
+  return { kind: "published", externalId: result.externalId };
 }
 
 /** Processa todos os destinos ainda pendentes de um post — usado tanto pra "publicar agora"
@@ -231,5 +309,5 @@ async function publishToAccount(params: {
 export async function processAllPendingAccountsForPost(scheduledPostId: string): Promise<void> {
   const all = await scheduledPostAccountsRepo.listByPost(scheduledPostId);
   const pending = all.filter((a) => a.status === "scheduled");
-  await Promise.allSettled(pending.map((a) => processScheduledPostAccount(a.id)));
+  await Promise.allSettled(pending.map((a) => processScheduledPostAccount(a.id, { deferInstagramProcessing: false })));
 }

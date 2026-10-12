@@ -21,6 +21,7 @@ type CreateBody = {
   videoSource?: "url" | "drive";
   driveFileId?: string | null;
   driveFileName?: string | null;
+  coverUrl?: string | null;
   caption: string;
   scheduledAt: string | null;
   socialAccountIds: string[];
@@ -67,6 +68,7 @@ export async function POST(request: Request) {
     videoSource,
     driveFileId: videoSource === "drive" ? (body.driveFileId ?? null) : null,
     driveFileName: videoSource === "drive" ? (body.driveFileName ?? null) : null,
+    coverUrl: body.coverUrl ?? null,
     caption: body.caption ?? "",
     scheduledAt: scheduledAtIso,
     status: isImmediate ? "processing" : "scheduled",
@@ -82,6 +84,7 @@ export async function POST(request: Request) {
         scheduledPostId: post.id,
         socialAccountId: account.id,
         status: "scheduled",
+        mediaContainerId: null,
         externalPostId: null,
         errorCode: null,
         errorMessage: null,
@@ -123,7 +126,11 @@ export async function POST(request: Request) {
 }
 
 function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Falha inesperada ao salvar o agendamento.";
+  const message = error instanceof Error ? error.message : "Falha inesperada ao salvar o agendamento.";
+  if (/could not find the 'cover_url' column of 'scheduled_posts' in the schema cache/i.test(message)) {
+    return "O banco ainda não reconhece a capa do vídeo. Aplique a migration supabase/migrations/0003_scheduled_post_cover.sql no Supabase e tente novamente.";
+  }
+  return message;
 }
 
 function isTransientDatabaseError(error: unknown): boolean {

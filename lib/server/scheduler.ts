@@ -5,12 +5,11 @@ import { processScheduledPostAccount } from "@/lib/server/meta/publish";
 // 30-100 contas conectadas sem disparar tudo de uma vez contra a Graph API (rate limit).
 const CONCURRENCY = 5;
 
-/** Ponto de entrada do agendador: busca todos os destinos "due" — agendados pra agora (ou
- *  antes) e ainda não processados, incluindo retries cujo next_attempt_at já passou — e
- *  publica cada um. Deve ser chamado periodicamente por um disparador externo (cron do SO,
- *  Vercel Cron, um serviço de ping como cron-job.org, etc. — ver
- *  docs/META_INTEGRATION_SETUP.md, seção "Scheduler em produção"; não há Supabase Cron aqui
- *  porque o banco deste projeto é SQLite local, não Postgres).
+/** Ponto de entrada do agendador: busca no Supabase os destinos "due" — agendados pra agora
+ *  (ou antes) e ainda não processados, incluindo retries cujo next_attempt_at já passou — e
+ *  publica cada um. No servidor local persistente, instrumentation.ts chama esta função a
+ *  cada minuto. Em produção, o Supabase Cron chama /api/scheduled-posts/run-due a cada minuto;
+ *  não há dependência de processo local nem de GitHub Actions.
  *
  *  Idempotente e seguro contra chamadas concorrentes/repetidas: scheduledPostAccountsRepo
  *  .claim() garante que cada destino só é processado por uma execução, então rodar isso em

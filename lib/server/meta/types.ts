@@ -59,6 +59,7 @@ export type ScheduledPost = {
    *  organizado em "Zenx Creative - Agendados/@conta" (lib/server/google-drive.ts). */
   driveFileId: string | null;
   driveFileName: string | null;
+  coverUrl?: string | null;
   caption: string;
   scheduledAt: string | null;
   /** Status agregado (derivado dos destinos) — útil pra listagens; a verdade por destino
@@ -77,6 +78,7 @@ export type ScheduledPostAccount = {
   scheduledPostId: string;
   socialAccountId: string;
   status: ScheduledPostAccountStatus;
+  mediaContainerId: string | null;
   externalPostId: string | null;
   errorCode: string | null;
   errorMessage: string | null;

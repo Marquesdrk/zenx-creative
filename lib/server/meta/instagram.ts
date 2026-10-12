@@ -9,7 +9,8 @@ type StepEvent = (step: MetaIntegrationStep, metadata?: Record<string, unknown>)
 type ContainerStatus = "IN_PROGRESS" | "FINISHED" | "ERROR" | "EXPIRED" | "PUBLISHED";
 
 type MediaContainerResponse = { id: string };
-type ContainerStatusResponse = { status_code?: ContainerStatus; id?: string };
+type ContainerStatusResponse = { status_code?: ContainerStatus; status?: string; id?: string };
+export type ReelContainerStatus = { statusCode: ContainerStatus; status: string | null };
 type MediaPublishResponse = { id: string };
 
 /** Passo 1: cria o container de mídia do Reel a partir de uma URL pública do vídeo. A Meta
@@ -20,6 +21,7 @@ export async function createReelContainer(params: {
   accessToken: string;
   videoUrl: string;
   caption: string;
+  coverUrl?: string;
   graphBase?: string;
 }): Promise<string> {
   const url = graphUrl(params.graphBase ?? GRAPH_BASE, `${params.instagramUserId}/media`, {});
@@ -30,16 +32,21 @@ export async function createReelContainer(params: {
       media_type: "REELS",
       video_url: params.videoUrl,
       caption: params.caption,
+      ...(params.coverUrl ? { cover_url: params.coverUrl } : {}),
       access_token: params.accessToken,
     }),
   });
   return data.id;
 }
 
-async function fetchContainerStatus(containerId: string, accessToken: string, graphBase = GRAPH_BASE): Promise<ContainerStatus> {
-  const url = graphUrl(graphBase, containerId, { fields: "status_code", access_token: accessToken });
+export async function getReelContainerStatus(
+  containerId: string,
+  accessToken: string,
+  graphBase = GRAPH_BASE
+): Promise<ReelContainerStatus> {
+  const url = graphUrl(graphBase, containerId, { fields: "status_code,status", access_token: accessToken });
   const data = await graphFetch<ContainerStatusResponse>(url);
-  return data.status_code ?? "ERROR";
+  return { statusCode: data.status_code ?? "ERROR", status: data.status ?? null };
 }
 
 /** Recomendação oficial: checar status_code cerca de 1x por minuto, no máximo 5 vezes, antes
@@ -55,12 +62,17 @@ export async function waitForContainerReady(
   const intervalMs = opts.intervalMs ?? 60_000;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const status = await fetchContainerStatus(containerId, accessToken, opts.graphBase);
-    if (status === "FINISHED" || status === "PUBLISHED") return;
-    if (status === "ERROR") {
-      throw new Error("O Instagram reportou erro ao processar o vídeo do Reel (status ERROR).");
+    const result = await getReelContainerStatus(containerId, accessToken, opts.graphBase);
+    if (result.statusCode === "FINISHED" || result.statusCode === "PUBLISHED") return;
+    if (result.statusCode === "ERROR") {
+      const detail = result.status?.trim();
+      throw new Error(
+        detail
+          ? `O Instagram não conseguiu processar o Reel: ${detail}`
+          : "O Instagram reportou erro ao processar o vídeo do Reel (status ERROR), sem fornecer detalhes adicionais."
+      );
     }
-    if (status === "EXPIRED") {
+    if (result.statusCode === "EXPIRED") {
       throw new Error("O container do Reel expirou antes de ser publicado (mais de 24h em processamento).");
     }
     if (attempt < maxAttempts) {
@@ -99,6 +111,7 @@ export async function publishInstagramReel(params: {
   accessToken: string;
   videoUrl: string;
   caption: string;
+  coverUrl?: string;
   graphBase?: string;
   onEvent?: StepEvent;
 }): Promise<PublishInstagramReelResult> {
