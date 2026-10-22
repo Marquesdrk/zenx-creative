@@ -1,7 +1,8 @@
 import { socialAccountsRepo } from "@/lib/server/meta/db";
-import { GRAPH_BASE, getInstagramAppId, getInstagramAppSecret, getMetaAppId, getMetaAppSecret } from "./config";
+import { GRAPH_BASE, getMetaAppId, getMetaAppSecret } from "./config";
 import { graphFetch, graphUrl, MetaGraphError } from "./graph-client";
 import { logMetaApiError, logMetaStep } from "./log";
+import { fetchInstagramProfile } from "./instagram-auth";
 import type { GraphDebugTokenResponse } from "./types";
 
 export type TokenCheckResult = { valid: boolean; reason?: string; scopes?: string[] };
@@ -16,9 +17,6 @@ export type TokenCheckResult = { valid: boolean; reason?: string; scopes?: strin
 export async function checkAccountToken(socialAccountId: string): Promise<TokenCheckResult> {
   const account = await socialAccountsRepo.get(socialAccountId);
   if (!account) throw new Error("Conta não encontrada.");
-  if (account.status === "revoked") {
-    return { valid: false, reason: "Conta desconectada localmente — reconecte para gerar um token novo." };
-  }
 
   const token = await socialAccountsRepo.getAccessToken(socialAccountId);
   if (!token) {
@@ -26,14 +24,31 @@ export async function checkAccountToken(socialAccountId: string): Promise<TokenC
     return { valid: false, reason: "Token ausente." };
   }
 
-  const endpoint = "GET /debug_token";
   const isInstagramLogin = account.metadata.authFlow === "instagram_login";
+  const endpoint = isInstagramLogin ? "GET graph.instagram.com/me" : "GET /debug_token";
   try {
-    // Token de conta conectada via "Instagram Login" foi emitido sob o app do Instagram Login
-    // (getInstagramAppId/Secret) — pode ser um app dedicado diferente do app principal.
-    const appToken = isInstagramLogin
-      ? `${getInstagramAppId()}|${getInstagramAppSecret()}`
-      : `${getMetaAppId()}|${getMetaAppSecret()}`;
+    // Tokens do fluxo Instagram Login devem ser verificados no host do Instagram com /me.
+    // /debug_token em graph.facebook.com tenta validar o token como um token de app do Facebook;
+    // a resposta pode ser OAuthException code 190 mesmo quando o token do Instagram está válido.
+    if (isInstagramLogin) {
+      const profile = await fetchInstagramProfile(token);
+      if (!profile.id || profile.id !== account.instagramUserId) {
+        const reason = `O token retornou @${profile.username || "Instagram"}, que não corresponde à conta conectada. Reconecte o perfil correto.`;
+        await socialAccountsRepo.updateStatus(socialAccountId, "error", { lastError: reason });
+        logMetaStep("META_API_ERROR", { socialAccountId, endpoint, message: reason });
+        return { valid: false, reason };
+      }
+
+      await socialAccountsRepo.updateStatus(socialAccountId, "connected", { lastError: null });
+      logMetaStep("META_CONNECTION_VALIDATED", {
+        socialAccountId,
+        endpoint,
+        metadata: { username: profile.username, authFlow: "instagram_login" },
+      });
+      return { valid: true, scopes: account.permissions };
+    }
+
+    const appToken = `${getMetaAppId()}|${getMetaAppSecret()}`;
     const url = graphUrl(GRAPH_BASE, "debug_token", { input_token: token, access_token: appToken });
     const data = await graphFetch<GraphDebugTokenResponse>(url);
     const info = data.data;
@@ -52,7 +67,14 @@ export async function checkAccountToken(socialAccountId: string): Promise<TokenC
   } catch (err) {
     logMetaApiError(err, { endpoint, socialAccountId });
     if (err instanceof MetaGraphError && err.isAuthError) {
-      await socialAccountsRepo.updateStatus(socialAccountId, "revoked", { lastError: err.message });
+      // A resposta "Error validating application" indica um problema ao validar o app
+      // (credenciais/configuração da aplicação), não prova que o token desta conta foi
+      // revogado. Preserva o status para evitar desconectar em massa contas válidas.
+      const isApplicationValidationError =
+        /error validating application|cannot get application info/i.test(err.message);
+      if (!isApplicationValidationError) {
+        await socialAccountsRepo.updateStatus(socialAccountId, "revoked", { lastError: err.message });
+      }
       return { valid: false, reason: err.message };
     }
     const message = err instanceof Error ? err.message : "Falha ao verificar o token (rede/instabilidade da Meta).";
