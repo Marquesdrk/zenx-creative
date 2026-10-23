@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { ensureScheduledVideosFolder, isDriveConfigured, isDriveConnected } from "@/lib/server/google-drive";
 import { socialAccountsRepo } from "@/lib/server/meta/db";
 
-/** Garante as pastas de agendamento de todas as contas Instagram já cadastradas.
+/** Garante as pastas de agendamento de todas as contas Instagram e Páginas já cadastradas.
  *  É idempotente: contas que já possuem a pasta não geram duplicatas. */
 export async function POST() {
   if (!isDriveConfigured()) {
@@ -12,18 +12,18 @@ export async function POST() {
     return NextResponse.json({ error: "Google Drive não conectado — conecte em Configurações." }, { status: 409 });
   }
 
-  const accounts = (await socialAccountsRepo.list()).filter(
-    (account) => account.platform === "INSTAGRAM" && Boolean(account.username)
-  );
+  const accounts = (await socialAccountsRepo.list()).filter((account) => account.platform === "INSTAGRAM" || account.platform === "FACEBOOK" || account.platform === "YOUTUBE");
   const results = await Promise.all(
     accounts.map(async (account) => {
+      const folderName = account.username || account.accountName;
       try {
-        await ensureScheduledVideosFolder(account.username!);
-        return { id: account.id, username: account.username, ok: true as const };
+        await ensureScheduledVideosFolder(folderName);
+        return { id: account.id, platform: account.platform, folderName, ok: true as const };
       } catch (error) {
         return {
           id: account.id,
-          username: account.username,
+          platform: account.platform,
+          folderName,
           ok: false as const,
           error: error instanceof Error ? error.message : "Falha ao garantir a pasta.",
         };

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Layers3, Send } from "lucide-react";
 import { BulkScheduleComposer } from "@/components/meta/bulk-schedule-composer";
 import { ScheduledPostComposer } from "@/components/meta/scheduled-post-composer";
 import { ScheduledPostQueue } from "@/components/meta/scheduled-post-queue";
@@ -8,6 +9,7 @@ import { StatusSummary } from "@/components/meta/status-summary";
 import type { PublicSocialAccount, ScheduledPost, ScheduledPostAccount } from "@/lib/server/meta/types";
 
 export default function PublicarPage() {
+  const [publishMode, setPublishMode] = useState<"manual" | "bulk">("manual");
   const [socialAccounts, setSocialAccounts] = useState<PublicSocialAccount[]>([]);
   const [posts, setPosts] = useState<ScheduledPost[]>([]);
   const [accounts, setAccounts] = useState<ScheduledPostAccount[]>([]);
@@ -64,10 +66,35 @@ export default function PublicarPage() {
         <StatusSummary accounts={accounts} socialAccounts={socialAccounts} />
       </div>
 
-      <div className="mt-6 grid gap-4 lg:grid-cols-[1fr_360px]">
-        <div className="flex flex-col gap-4">
-          <ScheduledPostComposer accounts={socialAccounts} onCreated={refresh} />
-          <BulkScheduleComposer accounts={socialAccounts} onCreated={refresh} />
+      <div className="mt-6 grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="min-w-0">
+          <div className="grid grid-cols-2 gap-2 rounded-xl border border-border bg-[#0d0d0d] p-1">
+            <button
+              type="button"
+              onClick={() => setPublishMode("manual")}
+              aria-pressed={publishMode === "manual"}
+              className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-xs font-semibold transition-colors ${publishMode === "manual" ? "bg-accent text-background" : "text-muted hover:bg-card-hover hover:text-foreground"}`}
+            >
+              <Send size={14} />
+              Publicação manual
+            </button>
+            <button
+              type="button"
+              onClick={() => setPublishMode("bulk")}
+              aria-pressed={publishMode === "bulk"}
+              className={`flex min-h-11 items-center justify-center gap-2 rounded-md px-3 text-xs font-semibold transition-colors ${publishMode === "bulk" ? "bg-accent text-background" : "text-muted hover:bg-card-hover hover:text-foreground"}`}
+            >
+              <Layers3 size={14} />
+              Agendamento em lote
+            </button>
+          </div>
+          <div className="mt-3">
+            {publishMode === "manual" ? (
+              <ScheduledPostComposer accounts={socialAccounts} onCreated={refresh} />
+            ) : (
+              <BulkScheduleComposer accounts={socialAccounts} onCreated={refresh} />
+            )}
+          </div>
         </div>
         <ScheduledPostQueue
           posts={posts}

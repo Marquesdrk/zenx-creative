@@ -15,16 +15,14 @@ export async function POST(_request: Request, { params }: { params: Promise<{ id
   }
 
   const account = await socialAccountsRepo.get(id);
-  if (!account || account.platform !== "INSTAGRAM") {
-    return NextResponse.json({ error: "Conta do Instagram não encontrada." }, { status: 404 });
+  if (!account || (account.platform !== "INSTAGRAM" && account.platform !== "FACEBOOK" && account.platform !== "YOUTUBE")) {
+    return NextResponse.json({ error: "Conta Meta não encontrada." }, { status: 404 });
   }
-  if (!account.username) {
-    return NextResponse.json({ error: "Conta sem @usuário salvo — reconecte a conta." }, { status: 400 });
-  }
+  const folderName = account.username || account.accountName;
 
   try {
-    await ensureScheduledVideosFolder(account.username);
-    return NextResponse.json({ ok: true, folder: `Zenx Creative - Agendados/@${account.username.replace(/^@/, "")}` });
+    await ensureScheduledVideosFolder(folderName);
+    return NextResponse.json({ ok: true, folder: `Zenx Creative - Agendados/@${folderName.replace(/^@/, "")}` });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Falha ao criar a pasta no Google Drive.";
     return NextResponse.json({ error: message }, { status: 502 });

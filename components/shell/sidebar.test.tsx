@@ -14,9 +14,9 @@ describe("Sidebar", () => {
       "href",
       "/calendario"
     );
-    expect(screen.getByRole("link", { name: "Biblioteca" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Baixar vídeos" })).toHaveAttribute(
       "href",
-      "/biblioteca"
+      "/baixar-videos"
     );
     expect(screen.getByRole("link", { name: "Performance" })).toHaveAttribute(
       "href",
@@ -29,9 +29,9 @@ describe("Sidebar", () => {
   });
 
   it("marks only the item matching activeHref as active", () => {
-    render(<Sidebar activeHref="/biblioteca" profile={<div />} />);
+    render(<Sidebar activeHref="/baixar-videos" profile={<div />} />);
 
-    expect(screen.getByRole("link", { name: "Biblioteca" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Baixar vídeos" })).toHaveAttribute(
       "data-active",
       "true"
     );

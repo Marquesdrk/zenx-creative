@@ -18,10 +18,11 @@ import { analyzeVideoSource } from "@/lib/editor/source-analysis";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
 import { createDefaultManualOverrides, type Batch, type BatchItem, type Profile } from "@/lib/editor/types";
 
-// Use up to half the logical CPUs (2 FFmpeg threads per job), capped at two jobs,
-// to improve batch throughput without starving the rest of the computer.
-const logicalCpuCount = typeof navigator === "undefined" ? 4 : navigator.hardwareConcurrency || 4;
-const MAX_PARALLEL_RENDERS = Math.max(1, Math.min(2, Math.floor(logicalCpuCount / 4)));
+// Local browser runtimes can underreport hardwareConcurrency (for example, 4 on a 12-thread
+// workstation), which would serialize a GPU-backed batch. Keep three local encodes active;
+// serverless exports remain conservative to avoid exhausting function resources.
+const IS_VERCEL = Boolean(process.env.NEXT_PUBLIC_IS_VERCEL);
+const MAX_PARALLEL_RENDERS = IS_VERCEL ? 1 : 3;
 
 function generateCaption(filename: string, profile: Profile) {
   if (profile.engine === "UGC") return "Link na bio";
@@ -88,8 +89,6 @@ async function mapWithConcurrency<T, R>(
 // Os assets do perfil podem ser URLs do armazenamento do app ou do proxy do Google Drive. O
 // pipeline de render materializa ambos no servidor antes de chamar o ffmpeg.
 
-const IS_VERCEL = Boolean(process.env.NEXT_PUBLIC_IS_VERCEL);
-
 /** Envia o vídeo original + o profile pra rota de export/drive. Na Vercel, o vídeo precisa
  *  passar por um Blob temporário primeiro (contorna o limite de ~4.5MB de payload das
  *  functions); localmente não existe esse limite, então o arquivo vai direto no corpo da
@@ -138,6 +137,7 @@ export default function EditorPage() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [exportingBatchId, setExportingBatchId] = useState<string | null>(null);
   const [exportProgressLabel, setExportProgressLabel] = useState<string | null>(null);
+  const [stagedItemsByBatch, setStagedItemsByBatch] = useState<Record<string, string[]>>({});
   const [pageError, setPageError] = useState<string | null>(null);
   const [sendToDriveBatchId, setSendToDriveBatchId] = useState<string | null>(null);
   const [sendingToDriveBatchId, setSendingToDriveBatchId] = useState<string | null>(null);
@@ -232,6 +232,25 @@ export default function EditorPage() {
 
   function handleDeleteItem(item: BatchItem) {
     if (!window.confirm(`Remover "${item.filename}" deste lote?`)) return;
+    const stagedIds = stagedItemsByBatch[item.batchId] ?? [];
+    const batch = batches.find((candidate) => candidate.id === item.batchId);
+    const profile = batch ? profiles.find((candidate) => candidate.id === batch.profileId) : null;
+    if (stagedIds.includes(item.id) && profile) {
+      void fetch("/api/batches/export-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          batchId: item.batchId,
+          profile,
+          response: "discard-staged",
+          items: [{ id: item.id, filename: item.filename }],
+        }),
+      }).catch(() => undefined);
+      setStagedItemsByBatch((current) => ({
+        ...current,
+        [item.batchId]: (current[item.batchId] ?? []).filter((id) => id !== item.id),
+      }));
+    }
     removeLocalItemFiles(item);
     setItems((current) => current.filter((candidate) => candidate.id !== item.id));
     const remainingInBatch = items.filter((candidate) => candidate.batchId === item.batchId && candidate.id !== item.id);
@@ -270,9 +289,9 @@ export default function EditorPage() {
     }
 
     setExportingBatchId(batchId);
-    setExportProgressLabel(`Exportando 0/${batchItems.length}`);
+    const stagedItemIds = [...(stagedItemsByBatch[batchId] ?? [])];
+    setExportProgressLabel(`Exportando ${stagedItemIds.length}/${batchItems.length}`);
     setPageError(null);
-    const stagedItemIds: string[] = [];
     try {
       if (IS_VERCEL) {
         // As functions Vercel são efêmeras; nelas, mantém o fluxo com Blob e arquivo
@@ -314,6 +333,10 @@ export default function EditorPage() {
       } else {
         let rendered = 0;
         await mapWithConcurrency(batchItems, MAX_PARALLEL_RENDERS, async (item) => {
+          if (stagedItemIds.includes(item.id)) {
+            rendered += 1;
+            return;
+          }
           const file = fileRefs.get(item.id);
           if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
 
@@ -325,6 +348,10 @@ export default function EditorPage() {
 
           stagedItemIds.push(item.id);
           rendered += 1;
+          setStagedItemsByBatch((current) => ({
+            ...current,
+            [batchId]: Array.from(new Set([...(current[batchId] ?? []), item.id])),
+          }));
           setExportProgressLabel(`Renderizando ${rendered}/${batchItems.length}`);
         });
 
@@ -354,22 +381,21 @@ export default function EditorPage() {
       }
 
       batchItems.forEach(removeLocalItemFiles);
+      setStagedItemsByBatch((current) => {
+        const next = { ...current };
+        delete next[batchId];
+        return next;
+      });
       setBatches((current) => current.filter((candidate) => candidate.id !== batchId));
       setItems((current) => current.filter((item) => item.batchId !== batchId));
     } catch (error) {
-      if (stagedItemIds.length > 0) {
-        await fetch("/api/batches/export-local", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            batchId,
-            profile,
-            response: "discard-staged",
-            items: stagedItemIds.map((id) => ({ id, filename: "staged.mp4" })),
-          }),
-        }).catch(() => undefined);
-      }
-      setPageError(error instanceof Error ? error.message : "Falha ao exportar o lote.");
+      const detail = error instanceof Error ? error.message : "Falha ao exportar o lote.";
+      const retainedCount = stagedItemIds.length;
+      setPageError(
+        !IS_VERCEL && retainedCount > 0
+          ? `${detail} ${retainedCount}/${batchItems.length} vídeo(s) já renderizado(s) foram mantidos. Clique em Exportar novamente para continuar.`
+          : detail
+      );
     } finally {
       setExportingBatchId(null);
       setExportProgressLabel(null);
@@ -422,6 +448,26 @@ export default function EditorPage() {
   }
 
   function handleSaveEdit(updated: BatchItem, applyToAll: boolean) {
+    const stagedIds = stagedItemsByBatch[updated.batchId] ?? [];
+    const batch = batches.find((candidate) => candidate.id === updated.batchId);
+    const profile = batch ? profiles.find((candidate) => candidate.id === batch.profileId) : null;
+    if (stagedIds.length > 0 && profile) {
+      void fetch("/api/batches/export-local", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          batchId: updated.batchId,
+          profile,
+          response: "discard-staged",
+          items: stagedIds.map((id) => ({ id, filename: "staged.mp4" })),
+        }),
+      }).catch(() => undefined);
+      setStagedItemsByBatch((current) => {
+        const next = { ...current };
+        delete next[updated.batchId];
+        return next;
+      });
+    }
     setItems((current) =>
       current.map((item) => {
         if (item.id === updated.id) return updated;

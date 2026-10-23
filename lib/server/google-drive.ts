@@ -8,7 +8,8 @@ import { googleDriveTokensRepo, type GoogleDriveTokens } from "@/lib/server/goog
 // YouTube (lib/server/publishing/youtube.ts) precisar funcionar de verdade, ele precisa do
 // próprio fluxo de conexão/token, não pode reaproveitar este. Tokens vivem no Supabase (ver
 // lib/server/google/drive-tokens-db.ts) — precisam sobreviver a cold starts na Vercel.
-const SCOPES = ["https://www.googleapis.com/auth/drive.file"];
+const DRIVE_READ_SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const SCOPES = ["https://www.googleapis.com/auth/drive.file", DRIVE_READ_SCOPE];
 const ROOT_FOLDER_NAME = "Zenx Creative - Agendados";
 const REACTION_ROOT_FOLDER_NAME = "Zenx Creative - Reações";
 
@@ -106,6 +107,13 @@ export async function isDriveConnected(): Promise<boolean> {
   }
 }
 
+/** `drive.file` só enxerga arquivos criados/abertos pelo app. Para incluir vídeos que o usuário
+ *  enviou manualmente pela interface do Drive, a conexão também precisa do escopo drive.readonly. */
+export async function canReadAllDriveFiles(): Promise<boolean> {
+  const tokens = await loadDriveTokens();
+  return Boolean(tokens?.scope?.split(/\s+/).includes(DRIVE_READ_SCOPE));
+}
+
 export function getAuthUrl(): string {
   if (!isDriveConfigured()) {
     throw new Error(
@@ -117,7 +125,12 @@ export function getAuthUrl(): string {
     process.env.GOOGLE_CLIENT_SECRET,
     process.env.GOOGLE_REDIRECT_URI
   );
-  return client.generateAuthUrl({ access_type: "offline", prompt: "consent", scope: SCOPES });
+  return client.generateAuthUrl({
+    access_type: "offline",
+    prompt: "consent",
+    include_granted_scopes: true,
+    scope: SCOPES,
+  });
 }
 
 export async function handleOAuthCallback(code: string): Promise<void> {
@@ -191,29 +204,31 @@ async function ensureNestedFolder(drive: ReturnType<typeof google.drive>, segmen
 
 /** Igual a ensureNestedFolder, mas nunca cria nada — usado antes de listar arquivos, onde uma
  *  pasta inexistente só significa "nenhum vídeo enviado ainda", não um erro. */
-async function findChildFolderId(
+async function findChildFolderIds(
   drive: ReturnType<typeof google.drive>,
   name: string,
   parentId: string | null
-): Promise<string | null> {
+): Promise<string[]> {
   const parentClause = parentId ? ` and '${parentId}' in parents` : "";
   const res = await drive.files.list({
     q: `name = '${name.replace(/'/g, "\\'")}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false${parentClause}`,
     fields: "files(id)",
+    pageSize: 1000,
   });
-  return res.data.files?.[0]?.id ?? null;
+  return (res.data.files ?? []).flatMap((folder) => folder.id ? [folder.id] : []);
 }
 
-async function findNestedFolderId(
+async function findNestedFolderIds(
   drive: ReturnType<typeof google.drive>,
   segments: string[],
   parentId: string | null = null
-): Promise<string | null> {
-  if (segments.length === 0) return parentId;
+): Promise<string[]> {
+  if (segments.length === 0) return parentId ? [parentId] : [];
   const [head, ...rest] = segments;
-  const id = await findChildFolderId(drive, head, parentId);
-  if (!id) return null;
-  return findNestedFolderId(drive, rest, id);
+  const childIds = await findChildFolderIds(drive, head, parentId);
+  if (childIds.length === 0) return [];
+  const nested = await Promise.all(childIds.map((id) => findNestedFolderIds(drive, rest, id)));
+  return nested.flat();
 }
 
 export type DriveFolderFile = { id: string; name: string; createdTime: string | null };
@@ -225,19 +240,28 @@ export async function listFilesInFolder(folderSegments: string[]): Promise<Drive
   const client = await getOAuthClient();
   if (!client) throw new Error("Google Drive não conectado — conecte em Configurações antes de listar arquivos.");
   const drive = google.drive({ version: "v3", auth: client });
-  const folderId = await findNestedFolderId(drive, folderSegments);
-  if (!folderId) return [];
-  const res = await drive.files.list({
-    q: `'${folderId}' in parents and trashed = false and mimeType contains 'video/'`,
-    fields: "files(id, name, createdTime)",
-    orderBy: "createdTime",
-    pageSize: 1000,
-  });
-  return (res.data.files ?? []).map((file) => ({
-    id: file.id!,
-    name: file.name ?? "video.mp4",
-    createdTime: file.createdTime ?? null,
+  const folderIds = await findNestedFolderIds(drive, folderSegments);
+  if (folderIds.length === 0) return [];
+
+  // O Drive permite pastas com o mesmo nome no mesmo local. Escolher o primeiro resultado
+  // escondia todos os vídeos quando esse resultado era uma pasta vazia. Comparamos os caminhos
+  // completos e usamos a pasta correspondente mais populada, com desempate estável pelo ID.
+  const candidates = await Promise.all(folderIds.map(async (folderId) => {
+    const res = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false and mimeType contains 'video/'`,
+      fields: "files(id, name, createdTime)",
+      orderBy: "createdTime",
+      pageSize: 1000,
+    });
+    const files = (res.data.files ?? []).flatMap((file) => file.id ? [{
+      id: file.id,
+      name: file.name ?? "video.mp4",
+      createdTime: file.createdTime ?? null,
+    }] : []);
+    return { folderId, files };
   }));
+  candidates.sort((a, b) => b.files.length - a.files.length || a.folderId.localeCompare(b.folderId));
+  return candidates[0]?.files ?? [];
 }
 
 /** Mesma pasta usada por uploadScheduledVideoToDrive — única fonte de verdade do nome, pra

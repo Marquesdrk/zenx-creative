@@ -14,14 +14,25 @@ export function XStyleProfileForm({
 }) {
   const templateInputRef = useRef<HTMLInputElement>(null);
   const [uploadingTemplate, setUploadingTemplate] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
 
   async function handleTemplateSelected(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
+    const extension = file.name.split(".").pop()?.toLowerCase();
+    const supportedType = file.type.startsWith("image/") || ["jpg", "jpeg", "png", "webp", "avif"].includes(extension ?? "");
+    if (!supportedType) {
+      setTemplateError("Escolha um arquivo de imagem JPG, PNG, WebP ou AVIF.");
+      if (templateInputRef.current) templateInputRef.current.value = "";
+      return;
+    }
     setUploadingTemplate(true);
+    setTemplateError(null);
     try {
       const url = await uploadFile(file);
       onChange({ ...profile, backgroundImageUrl: url });
+    } catch (cause) {
+      setTemplateError(cause instanceof Error ? cause.message : "Não foi possível importar o template.");
     } finally {
       setUploadingTemplate(false);
       if (templateInputRef.current) templateInputRef.current.value = "";
@@ -79,10 +90,11 @@ export function XStyleProfileForm({
           <input
             ref={templateInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg,image/webp,image/avif"
             className="hidden"
             onChange={(event) => handleTemplateSelected(event.target.files)}
           />
+          {templateError && <p role="alert" className="text-xs text-red-300">{templateError}</p>}
           <div>
             <p className="mb-1.5 text-xs text-muted">Cor do título e do texto abaixo do vídeo</p>
             <div className="flex gap-2">

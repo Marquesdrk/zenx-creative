@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarRange, HardDrive, Loader2, RotateCw, Sparkles, X } from "lucide-react";
+import { CalendarRange, HardDrive, Loader2, Minus, Plus, RotateCw, Sparkles, X } from "lucide-react";
 import { BEST_TIME_SLOTS, pickTimeSlots, planSchedule } from "@/lib/scheduling/plan";
 import type { PublicSocialAccount } from "@/lib/server/meta/types";
+import { CoverImagePicker } from "@/components/meta/cover-image-picker";
 
 type DriveFile = { id: string; name: string; createdTime: string | null };
 
@@ -28,12 +29,9 @@ function loadStoredTimeSlots(): string[] {
   return BEST_TIME_SLOTS;
 }
 
-/** Agendamento automático em massa: em vez de escolher vídeo por vídeo, o usuário escolhe uma
- *  conta e quantos vídeos por dia — o sistema conta quantos vídeos ainda não usados existem na
- *  pasta de agendados dessa conta no Drive (a mesma que "Enviar ao Drive" no Editor em massa
- *  alimenta), publica o primeiro imediatamente como teste e distribui os demais nos horários
- *  escolhidos abaixo (editáveis, com os "melhores horários" como sugestão inicial). Os horários
- *  ficam salvos neste navegador. */
+/** Agendamento automático em massa: o usuário escolhe uma conta Instagram ou Página do
+ *  Facebook e quantos vídeos por dia. Os arquivos vêm da pasta de agendados da conta no Drive;
+ *  o primeiro é publicado imediatamente como teste e os demais seguem os horários escolhidos. */
 export function BulkScheduleComposer({
   accounts,
   onCreated,
@@ -41,17 +39,19 @@ export function BulkScheduleComposer({
   accounts: PublicSocialAccount[];
   onCreated: () => void;
 }) {
-  const instagramAccounts = useMemo(
-    () => accounts.filter((a) => a.status === "connected" && a.platform === "INSTAGRAM"),
+  const publishAccounts = useMemo(
+    () => accounts.filter((a) => a.status === "connected" && (a.platform === "INSTAGRAM" || a.platform === "FACEBOOK" || a.platform === "YOUTUBE")),
     [accounts]
   );
   const [socialAccountId, setSocialAccountId] = useState<string>("");
+  const selectedAccount = publishAccounts.find((account) => account.id === socialAccountId) ?? null;
   // Lazy initializer em vez de useEffect: só roda uma vez, no primeiro render, e o
   // localStorage só existe no client mesmo (loadStoredTimeSlots cai no padrão durante SSR).
   const [timeSlots, setTimeSlots] = useState<string[]>(() => loadStoredTimeSlots());
   const [newSlotTime, setNewSlotTime] = useState("12:00");
   const [videosPerDay, setVideosPerDay] = useState(1);
   const [caption, setCaption] = useState("");
+  const [coverFile, setCoverFile] = useState<File | null>(null);
   const [files, setFiles] = useState<DriveFile[] | null>(null);
   const [loadingFiles, setLoadingFiles] = useState(false);
   const [filesError, setFilesError] = useState<string | null>(null);
@@ -149,6 +149,16 @@ export function BulkScheduleComposer({
     const schedule = planSchedule(scheduledFiles.length, effectiveVideosPerDay, new Date(), timeSlots);
 
     try {
+      let coverUrl: string | null = null;
+      if (coverFile) {
+        if (coverFile.size > 4 * 1024 * 1024) throw new Error("A capa deve ter no máximo 4 MB.");
+        setProgressLabel("Enviando capa do lote…");
+        const formData = new FormData();
+        formData.append("file", coverFile);
+        const coverRes = await fetch("/api/upload", { method: "POST", body: formData });
+        if (!coverRes.ok) throw new Error("Falha ao enviar a capa do lote.");
+        coverUrl = ((await coverRes.json()) as { url: string }).url;
+      }
       for (let i = 0; i < freshFiles.length; i += 1) {
         setProgressLabel(i === 0 ? `Publicando teste 1/${freshFiles.length}` : `Agendando ${i + 1}/${freshFiles.length}`);
         const payload = {
@@ -156,6 +166,7 @@ export function BulkScheduleComposer({
           driveFileId: freshFiles[i].id,
           driveFileName: freshFiles[i].name,
           caption,
+          coverUrl,
           scheduledAt: i === 0 ? null : schedule[i - 1].toISOString(),
           socialAccountIds: [socialAccountId],
         };
@@ -180,6 +191,7 @@ export function BulkScheduleComposer({
       }
       setSuccessMessage(`Teste publicado agora e ${scheduledFiles.length} vídeo(s) agendado(s) com sucesso.`);
       setFiles([]);
+      setCoverFile(null);
       onCreated();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : "Falha ao agendar os vídeos.");
@@ -198,15 +210,15 @@ export function BulkScheduleComposer({
         Agendamento automático em massa
       </p>
       <p className="mt-1 text-xs text-muted">
-        Escolha a conta e quantos vídeos por dia — o primeiro vídeo será publicado agora como
-        teste e os demais serão distribuídos nos horários escolhidos abaixo.
+        Escolha uma conta, defina a quantidade diária e os horários. O primeiro vídeo será publicado
+        agora como teste; os demais seguirão o ritmo que você configurar.
       </p>
 
       <div className="mt-4">
-        <p className="mb-1.5 text-[11px] font-semibold uppercase text-muted">Conta</p>
-        {instagramAccounts.length === 0 ? (
+        <p className="mb-1.5 text-[11px] font-semibold uppercase text-muted">Conta ou Página</p>
+        {publishAccounts.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-3 text-xs text-muted">
-            Nenhuma conta do Instagram conectada.
+            Nenhuma conta do Instagram ou Página do Facebook conectada.
           </p>
         ) : (
           <select
@@ -215,18 +227,27 @@ export function BulkScheduleComposer({
             className="h-9 w-full rounded-lg border border-border bg-[#171717] px-3 text-xs text-foreground"
           >
             <option value="">Selecione uma conta…</option>
-            {instagramAccounts.map((account) => (
+            {publishAccounts.map((account) => (
               <option key={account.id} value={account.id}>
-                {account.accountName}
+                {account.platform === "FACEBOOK" ? "Página Facebook" : account.platform === "YOUTUBE" ? "Canal YouTube" : "Instagram"} · {account.accountName}
                 {account.username ? ` · @${account.username.replace(/^@/, "")}` : ""}
               </option>
             ))}
           </select>
         )}
+        {selectedAccount?.platform === "YOUTUBE" && (
+          <p className="mt-1.5 text-[11px] text-muted">
+            Os vídeos serão enviados como Shorts a este canal (vertical, até 60 s). A cota da API permite ≈6 uploads por dia no total.
+          </p>
+        )}
+        {selectedAccount?.platform === "FACEBOOK" && (
+          <p className="mt-1.5 text-[11px] text-muted">Os vídeos serão publicados como Reels nesta Página do Facebook.</p>
+        )}
       </div>
 
       <div className="mt-4">
-        <p className="mb-1.5 text-[11px] font-semibold uppercase text-muted">Horários de publicação</p>
+        <p className="mb-1 text-[11px] font-semibold uppercase text-muted">1. Horários disponíveis</p>
+        <p className="mb-2 text-xs text-gray-400">Adicione os horários em que você aceita publicar. Você pode editar esta lista a qualquer momento.</p>
         <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-border bg-[#171717] p-2">
           {timeSlots.map((slot) => (
             <span key={slot} className="inline-flex items-center gap-1 rounded-md bg-white/[0.06] px-2 py-1 text-xs text-foreground">
@@ -269,19 +290,42 @@ export function BulkScheduleComposer({
       </div>
 
       <div className="mt-4">
-        <p className="mb-1.5 flex items-center justify-between text-[11px] font-semibold uppercase text-muted">
-          Vídeos por dia
-          <span className="normal-case text-gray-400">horários usados: {slots.join(", ")}</span>
-        </p>
-        <input
-          type="range"
-          min={1}
-          max={maxVideosPerDay}
-          value={effectiveVideosPerDay}
-          onChange={(event) => setVideosPerDay(Number(event.target.value))}
-          className="w-full accent-accent"
-        />
-        <p className="mt-1 text-xs text-gray-300">{effectiveVideosPerDay} vídeo(s) por dia</p>
+        <p className="mb-1 text-[11px] font-semibold uppercase text-muted">2. Quantos vídeos por dia?</p>
+        <p className="mb-2 text-xs text-gray-400">A quantidade define quantos horários da lista acima serão usados, espaçados ao longo do dia.</p>
+        <div className="flex flex-col gap-3 rounded-lg border border-border bg-[#171717] p-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setVideosPerDay((value) => Math.max(1, value - 1))}
+              disabled={effectiveVideosPerDay <= 1}
+              aria-label="Diminuir vídeos por dia"
+              className="flex h-9 w-9 items-center justify-center rounded-md border border-border text-foreground hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Minus size={14} />
+            </button>
+            <div className="min-w-24 text-center">
+              <p className="text-lg font-semibold leading-5 text-foreground">{effectiveVideosPerDay}</p>
+              <p className="mt-1 text-[11px] text-muted">{effectiveVideosPerDay === 1 ? "vídeo por dia" : "vídeos por dia"}</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setVideosPerDay((value) => Math.min(maxVideosPerDay, value + 1))}
+              disabled={effectiveVideosPerDay >= maxVideosPerDay}
+              aria-label="Aumentar vídeos por dia"
+              className="flex h-9 w-9 items-center justify-center rounded-md border border-border text-foreground hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+          <div className="min-w-0 sm:text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted">Horários usados neste lote</p>
+            <div className="mt-1.5 flex flex-wrap gap-1.5 sm:justify-end">
+              {slots.map((slot) => (
+                <span key={slot} className="rounded-md bg-accent/15 px-2 py-1 text-xs font-medium text-accent">{slot}</span>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
       <div className="mt-4">
@@ -295,16 +339,18 @@ export function BulkScheduleComposer({
         />
       </div>
 
+      <CoverImagePicker file={coverFile} onChange={setCoverFile} />
+
       <div className="mt-4 flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-xs text-gray-300">
         <HardDrive size={14} className="shrink-0 text-muted" />
         <span className="flex-1">
           {!socialAccountId
-            ? "Escolha uma conta para ver quantos vídeos estão disponíveis no Drive."
+            ? "Escolha uma conta ou Página para ver quantos vídeos estão disponíveis no Drive."
             : loadingFiles
               ? "Contando vídeos disponíveis…"
               : filesError
                 ? <span className="text-red-300">{filesError}</span>
-                : `${files?.length ?? 0} vídeo(s) disponível(is) na pasta desta conta.`}
+              : `${files?.length ?? 0} vídeo(s) disponível(is) na pasta desta conta/Página.`}
         </span>
         {socialAccountId && (
           <button

@@ -1,7 +1,6 @@
 import {
   SquarePen,
   CalendarDays,
-  PlaySquare,
   BarChart3,
   CircleUserRound,
   Link2,
@@ -10,6 +9,7 @@ import {
   LayoutTemplate,
   type LucideIcon,
   ClipboardList,
+  Download,
 } from "lucide-react";
 
 export type NavItem = {
@@ -23,7 +23,7 @@ export const NAV_ITEMS: NavItem[] = [
   { label: "Publicar", href: "/publicar", icon: Send },
   { label: "Calendário", href: "/calendario", icon: CalendarDays },
   { label: "Contas conectadas", href: "/contas-meta", icon: Link2 },
-  { label: "Biblioteca", href: "/biblioteca", icon: PlaySquare },
+  { label: "Baixar vídeos", href: "/baixar-videos", icon: Download },
   { label: "Templates", href: "/templates", icon: LayoutTemplate },
   { label: "Performance", href: "/performance", icon: BarChart3 },
   { label: "Relatório", href: "/relatorio", icon: ClipboardList },

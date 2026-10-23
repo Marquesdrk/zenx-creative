@@ -1,15 +1,12 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import BibliotecaPage from "./page";
 
+const { redirect } = vi.hoisted(() => ({ redirect: vi.fn() }));
+vi.mock("next/navigation", () => ({ redirect }));
+
 describe("BibliotecaPage", () => {
-  it("renders the module title, subtitle, action button, and its skeleton", () => {
-    render(<BibliotecaPage />);
-    expect(screen.getByRole("heading", { name: "Biblioteca de vídeos" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Gerencie, organize e utilize seus vídeos em todos os seus projetos.")
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "+ Enviar vídeo" })).toBeInTheDocument();
-    expect(screen.getByTestId("biblioteca-skeleton")).toBeInTheDocument();
+  it("redirects legacy links to the video downloader", () => {
+    BibliotecaPage();
+    expect(redirect).toHaveBeenCalledWith("/baixar-videos");
   });
 });

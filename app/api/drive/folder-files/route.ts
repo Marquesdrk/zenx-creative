@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { ensureScheduledVideosFolder, isDriveConfigured, isDriveConnected, listFilesInFolder, scheduledVideosFolderSegments } from "@/lib/server/google-drive";
+import { canReadAllDriveFiles, ensureScheduledVideosFolder, isDriveConfigured, isDriveConnected, listFilesInFolder, scheduledVideosFolderSegments } from "@/lib/server/google-drive";
 import { scheduledPostsRepo, socialAccountsRepo } from "@/lib/server/meta/db";
 
 /** Lista os vídeos "disponíveis" (ainda não agendados) na pasta de agendados de uma conta —
@@ -12,6 +12,11 @@ export async function GET(request: Request) {
     }
     if (!(await isDriveConnected())) {
       return NextResponse.json({ error: "Google Drive não conectado — conecte em Configurações." }, { status: 409 });
+    }
+    if (!(await canReadAllDriveFiles())) {
+      return NextResponse.json({
+        error: "A conexão atual só lista arquivos criados pelo Zenx. Reconecte o Google Drive em Configurações para liberar a leitura dos vídeos enviados manualmente.",
+      }, { status: 409 });
     }
 
     const socialAccountId = new URL(request.url).searchParams.get("socialAccountId");

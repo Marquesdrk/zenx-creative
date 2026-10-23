@@ -20,7 +20,17 @@ type BrandAccounts = {
   profilePictureUrl: string | null;
   instagram: PublicSocialAccount | null;
   facebook: PublicSocialAccount | null;
+  youtube: PublicSocialAccount | null;
 };
+
+/** Conta usada nas ações da linha (diagnóstico/desconectar) — a primeira conectada da marca. */
+function primaryAccount(brand: BrandAccounts) {
+  return brand.instagram ?? brand.facebook ?? brand.youtube;
+}
+
+function normalizeName(value: string | null | undefined) {
+  return (value ?? "").toLowerCase().replace(/^@/, "").replace(/[^a-z0-9]/g, "");
+}
 
 function connectionLabel(status: SocialAccountStatus | "disconnected") {
   if (status === "connected") return "Ativa";
@@ -82,6 +92,7 @@ function groupAccounts(accounts: PublicSocialAccount[]) {
         profilePictureUrl: account.profilePictureUrl,
         instagram: null,
         facebook: null,
+        youtube: null,
       } satisfies BrandAccounts);
     if (account.platform === "INSTAGRAM") {
       current.instagram = account;
@@ -95,14 +106,42 @@ function groupAccounts(accounts: PublicSocialAccount[]) {
     }
     map.set(key, current);
   }
-  return Array.from(map.values());
+
+  // Canais do YouTube não têm Página/Instagram por trás: entram na marca de mesmo nome/@handle
+  // (se houver) ou viram uma linha própria.
+  const brands = Array.from(map.values());
+  for (const account of accounts.filter((a) => a.platform === "YOUTUBE")) {
+    const names = [account.accountName, account.username].map(normalizeName).filter(Boolean);
+    const match = brands.find(
+      (brand) =>
+        !brand.youtube &&
+        (brand.instagram || brand.facebook) &&
+        [brand.name, brand.handle, brand.instagram?.username, brand.facebook?.username]
+          .map(normalizeName)
+          .some((n) => n && names.includes(n))
+    );
+    if (match) {
+      match.youtube = account;
+    } else {
+      brands.push({
+        key: `youtube:${account.platformAccountId}`,
+        name: account.accountName,
+        handle: account.username ? `@${account.username.replace(/^@/, "")}` : "canal do YouTube",
+        profilePictureUrl: account.profilePictureUrl,
+        instagram: null,
+        facebook: null,
+        youtube: account,
+      });
+    }
+  }
+  return brands;
 }
 
 function AccountSlot({
   platform,
   account,
 }: {
-  platform: "INSTAGRAM" | "TIKTOK" | "FACEBOOK";
+  platform: "INSTAGRAM" | "TIKTOK" | "FACEBOOK" | "YOUTUBE";
   account?: PublicSocialAccount | null;
 }) {
   const status = account?.status ?? "disconnected";
@@ -111,7 +150,7 @@ function AccountSlot({
       <div className="flex min-w-0 items-center gap-2">
         <PlatformIcon platform={platform} />
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">{platform === "INSTAGRAM" ? "Instagram" : platform === "FACEBOOK" ? "Facebook" : "TikTok"}</p>
+          <p className="truncate text-sm font-semibold text-foreground">{platform === "INSTAGRAM" ? "Instagram" : platform === "FACEBOOK" ? "Facebook" : platform === "YOUTUBE" ? "YouTube" : "TikTok"}</p>
           <p className="truncate text-xs text-muted">
             {account?.username ? `@${account.username.replace(/^@/, "")}` : account ? account.accountName : "Não conectado"}
           </p>
@@ -172,6 +211,7 @@ function ContasMetaContent() {
 
   const instagramAccounts = accounts.filter((account) => account.platform === "INSTAGRAM");
   const facebookAccounts = accounts.filter((account) => account.platform === "FACEBOOK");
+  const youtubeAccounts = accounts.filter((account) => account.platform === "YOUTUBE");
   const brandRows = useMemo(() => {
     const normalized = query.trim().toLowerCase();
     return groupAccounts(accounts).filter((brand) => {
@@ -196,11 +236,12 @@ function ContasMetaContent() {
       />
       <PageHeader title="Contas conectadas" description="Gerencie todas as suas contas de redes sociais conectadas às suas marcas." />
 
-      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+      <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard icon={Users} value={brandRows.length} label="Marcas conectadas" />
         <StatCard icon={CheckCircle2} value={instagramAccounts.length} label="Contas Instagram" tone="pink" />
         <StatCard icon={CheckCircle2} value={0} label="Contas TikTok" tone="blue" />
         <StatCard icon={CheckCircle2} value={facebookAccounts.length} label="Contas Facebook" tone="blue" />
+        <StatCard icon={CheckCircle2} value={youtubeAccounts.length} label="Canais YouTube" tone="pink" />
         <StatCard icon={Users} value={`${accounts.length} / ${limit}`} label="Contas utilizadas" />
       </div>
 
@@ -265,10 +306,11 @@ function ContasMetaContent() {
                         {brand.key === brandRows[0]?.key && <span className="mt-2 inline-flex rounded-full bg-accent/20 px-2 py-1 text-[11px] font-semibold text-[#B8B0FF]">Marca principal</span>}
                       </div>
                     </div>
-                  <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-3">
+                  <div className="grid min-w-0 grid-cols-1 gap-2.5 sm:grid-cols-4">
                     <AccountSlot platform="INSTAGRAM" account={brand.instagram} />
                     <AccountSlot platform="TIKTOK" />
                     <AccountSlot platform="FACEBOOK" account={brand.facebook} />
+                    <AccountSlot platform="YOUTUBE" account={brand.youtube} />
                   </div>
                   <div className="flex shrink-0 flex-nowrap items-center justify-end gap-2">
                     <a
@@ -277,22 +319,23 @@ function ContasMetaContent() {
                     >
                       Gerenciar
                     </a>
-                    {brand.instagram && (
+                    {[brand.instagram, brand.facebook, brand.youtube].filter((account): account is PublicSocialAccount => Boolean(account)).map((account) => (
                       <button
+                        key={`drive-folder-${account.id}`}
                         type="button"
-                        onClick={() => handleEnsureDriveFolder(brand.instagram!.id)}
-                        disabled={busyId === brand.instagram.id}
-                        aria-label={`Criar pasta no Drive para ${brand.name}`}
-                        title="Criar pasta de agendados no Google Drive"
+                        onClick={() => handleEnsureDriveFolder(account.id)}
+                        disabled={busyId === account.id}
+                        aria-label={`Criar pasta no Drive para ${account.accountName}`}
+                        title={`Criar pasta de agendados no Google Drive · ${account.platform === "FACEBOOK" ? "Página Facebook" : account.platform === "YOUTUBE" ? "Canal YouTube" : "Instagram"}`}
                         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-card-hover hover:text-foreground disabled:opacity-40"
                       >
                         <FolderPlus size={14} />
                       </button>
-                    )}
-                    {(brand.instagram || brand.facebook) && (
+                    ))}
+                    {primaryAccount(brand) && (
                       <button
                         type="button"
-                        onClick={() => setDiagnosticsAccountId((brand.instagram ?? brand.facebook)?.id ?? "")}
+                        onClick={() => setDiagnosticsAccountId(primaryAccount(brand)?.id ?? "")}
                         aria-label={`Diagnóstico de ${brand.name}`}
                         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-card-hover hover:text-foreground"
                         title="Diagnóstico da conexão"
@@ -300,11 +343,11 @@ function ContasMetaContent() {
                         <Stethoscope size={14} />
                       </button>
                     )}
-                    {(brand.instagram || brand.facebook) && (
+                    {primaryAccount(brand) && (
                       <button
                         type="button"
-                        onClick={() => handleDisconnect((brand.instagram ?? brand.facebook)?.id ?? "")}
-                        disabled={busyId === (brand.instagram ?? brand.facebook)?.id}
+                        onClick={() => handleDisconnect(primaryAccount(brand)?.id ?? "")}
+                        disabled={busyId === primaryAccount(brand)?.id}
                         aria-label={`Desconectar ${brand.name}`}
                         className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-[#101014] text-muted hover:bg-red-500/15 hover:text-red-300 disabled:opacity-40"
                       >
@@ -349,6 +392,7 @@ function ContasMetaContent() {
               ["Instagram", instagramAccounts.length, "bg-pink-500"],
               ["TikTok", 0, "bg-cyan-400"],
               ["Facebook", facebookAccounts.length, "bg-blue-500"],
+              ["YouTube", youtubeAccounts.length, "bg-red-500"],
             ].map(([label, count, color]) => (
               <div key={label as string} className="mt-4">
                 <div className="mb-2 flex justify-between text-sm">
@@ -367,6 +411,7 @@ function ContasMetaContent() {
             <div className="p-2">
               <div className="flex items-center gap-3 rounded-lg p-3 text-muted"><PlatformIcon platform="TIKTOK" /><span className="text-sm font-semibold">Conectar TikTok</span></div>
               <a href="/api/meta/auth" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><PlatformIcon platform="FACEBOOK" /><span className="text-sm font-semibold text-foreground">Conectar Facebook</span></a>
+              <a href="/api/youtube/auth" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><PlatformIcon platform="YOUTUBE" /><span className="text-sm font-semibold text-foreground">Conectar YouTube</span></a>
               <a href="/configuracoes" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><AlertTriangle size={20} className="text-[#9B8CFF]" /><span className="text-sm font-semibold text-foreground">Gerenciar integrações</span></a>
             </div>
           </AppCard>

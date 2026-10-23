@@ -1,6 +1,6 @@
 import { socialAccountsRepo } from "@/lib/server/meta/db";
 import { GRAPH_BASE } from "./config";
-import { graphFetch, graphUrl } from "./graph-client";
+import { graphFetch, graphUrl, MetaGraphError } from "./graph-client";
 import type {
   DiscoveredAsset,
   DiscoveredFacebookPage,
@@ -25,13 +25,25 @@ export type DiscoveredRawPage = {
  *  Instagram vinculada (se houver) — pagina por `paging.next` até esgotar, necessário pra
  *  quem administra muitas Páginas (ex.: agências com 30-100 clientes). */
 export async function fetchManagedPages(userAccessToken: string): Promise<DiscoveredRawPage[]> {
+  try {
+    return await fetchPagesWithFields(userAccessToken, PAGE_FIELDS_WITH_INSTAGRAM);
+  } catch (err) {
+    // Login só com permissões de Página (sem instagram_basic) faz o campo do Instagram falhar
+    // e derrubaria a listagem inteira — Páginas do Facebook não dependem dele. Erros de
+    // autenticação/rede não são o caso: repropaga.
+    if (err instanceof MetaGraphError && !err.isAuthError && !err.isRecoverable) {
+      return fetchPagesWithFields(userAccessToken, PAGE_FIELDS_BASE);
+    }
+    throw err;
+  }
+}
+
+const PAGE_FIELDS_BASE = "id,name,access_token,category,picture{url}";
+const PAGE_FIELDS_WITH_INSTAGRAM = `${PAGE_FIELDS_BASE},instagram_business_account{id,username,name,profile_picture_url}`;
+
+async function fetchPagesWithFields(userAccessToken: string, fields: string): Promise<DiscoveredRawPage[]> {
   const pages: DiscoveredRawPage[] = [];
-  let url: string | null = graphUrl(GRAPH_BASE, "me/accounts", {
-    access_token: userAccessToken,
-    fields:
-      "id,name,access_token,category,picture{url},instagram_business_account{id,username,name,profile_picture_url}",
-    limit: 100,
-  });
+  let url: string | null = graphUrl(GRAPH_BASE, "me/accounts", { access_token: userAccessToken, fields, limit: 100 });
 
   while (url) {
     const data: GraphAccountsResponse = await graphFetch<GraphAccountsResponse>(url);

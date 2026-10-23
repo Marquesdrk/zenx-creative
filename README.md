@@ -4,7 +4,7 @@ Aplicação local para edição e publicação de vídeos em lote.
 
 ## Executar em outra máquina
 
-Requisitos: Git, Node.js 22.5 ou superior e npm.
+Requisitos: Git, Node.js 22.5 ou superior, npm e `yt-dlp` no PATH para usar a aba de downloads.
 
 ```powershell
 git clone https://github.com/Marquesdrk/zenx-creative.git
@@ -13,6 +13,8 @@ npm ci
 Copy-Item .env.local.example .env.local
 npm run dev
 ```
+
+No Windows, instale o `yt-dlp` com `winget install yt-dlp.yt-dlp` ou siga a instalação oficial. Em macOS/Linux, instale-o pelo gerenciador de pacotes da sua distribuição. Se o executável tiver outro nome ou caminho, defina `YT_DLP_PATH` no `.env.local`. O Instagram pode exigir cookies: exporte a sessão para um arquivo Netscape `cookies.txt` e defina `YT_DLP_COOKIES` com o caminho absoluto, ou tente `YT_DLP_COOKIES_FROM_BROWSER=chrome`, `edge` ou `brave`.
 
 Abra [http://localhost:7070](http://localhost:7070). No macOS/Linux, use `cp .env.local.example .env.local` no lugar de `Copy-Item`.
 

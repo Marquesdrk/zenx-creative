@@ -7,7 +7,7 @@ import { get } from "@vercel/blob";
 import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { createReadStream, createWriteStream, existsSync } from "node:fs";
-import { copyFile, mkdir, rm, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { Readable } from "node:stream";
 import os from "node:os";
 import path from "node:path";
@@ -34,8 +34,10 @@ const ROTATE_FILTERS: Record<number, string[]> = {
 // O render tem duas passagens (loop da reação + composição final). Limita cada processo
 // para a exportação não ocupar todos os núcleos e deixar o restante do computador sem resposta.
 const ENCODE_THREADS = Math.max(1, Math.min(2, Math.floor(os.cpus().length * 0.5)));
+const FILTER_THREADS = Math.max(2, Math.min(4, Math.floor(os.cpus().length / 3)));
 const PING_PONG_CACHE_DIR = path.join(os.tmpdir(), "zenx-reaction-cache");
 const pingPongReactionCache = new Map<string, Promise<string>>();
+const loopReactionCache = new Map<string, Promise<string>>();
 const PROFILE_MEDIA_CACHE_DIR = path.join(os.tmpdir(), `zenx-profile-media-${process.pid}`);
 const MAX_PROFILE_MEDIA_CACHE_ENTRIES = 3;
 type CachedProfileMedia = { path: string; cleanup: false; cacheKey: string };
@@ -43,8 +45,11 @@ const profileMediaCache = new Map<
   string,
   { promise: Promise<{ path: string } | null>; activeUsers: number; lastUsedAt: number }
 >();
+const xStyleBackgroundCache = new Map<string, Promise<string>>();
 let nvencAvailablePromise: Promise<boolean> | null = null;
+let cudaOverlayAvailablePromise: Promise<boolean> | null = null;
 let nvencDisabled = false;
+let cudaOverlayDisabled = false;
 
 const FALLBACK_TEXT_FONT_PATH = path.join(process.cwd(), "assets", "fonts", "arialbd.ttf");
 const RENDER_FONT_PATHS = {
@@ -326,10 +331,111 @@ function supportsNvenc() {
   return nvencAvailablePromise;
 }
 
+function supportsCudaOverlay() {
+  if (cudaOverlayDisabled) return Promise.resolve(false);
+  if (cudaOverlayAvailablePromise) return cudaOverlayAvailablePromise;
+  if (!ffmpegStatic) return Promise.resolve(false);
+  cudaOverlayAvailablePromise = new Promise<boolean>((resolve) => {
+    execFile(
+      ffmpegStatic!,
+      [
+        "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=0.1",
+        "-f", "lavfi", "-i", "color=c=white:s=16x16:d=0.1",
+        "-filter_complex", "[0:v]format=nv12,hwupload_cuda[main];[1:v]format=nv12,hwupload_cuda[over];[main][over]overlay_cuda[outv]",
+        "-map", "[outv]", "-frames:v", "1", "-c:v", "h264_nvenc", "-preset", "p2", "-f", "null", "-",
+      ],
+      { windowsHide: true, timeout: 15_000, maxBuffer: 1024 * 1024 },
+      (error) => resolve(!error)
+    );
+  });
+  return cudaOverlayAvailablePromise;
+}
+
+/** Scales/crops the static X Style artwork once per profile asset, not once per frame.
+ * FFmpeg's image loop otherwise re-runs a full 1080x1920 scale for every output frame. */
+async function prepareXStyleBackground(inputPath: string) {
+  const file = await stat(inputPath);
+  const cacheKey = createHash("sha256")
+    .update(`${inputPath}:${file.size}:${file.mtimeMs}:${OUTPUT_WIDTH}x${OUTPUT_HEIGHT}`)
+    .digest("hex");
+  const existing = xStyleBackgroundCache.get(cacheKey);
+  if (existing) return existing;
+
+  const pending = (async () => {
+    if (!ffmpegStatic) throw new Error("FFmpeg não disponível para preparar o template.");
+    const ffmpegPath = ffmpegStatic;
+    await mkdir(PROFILE_MEDIA_CACHE_DIR, { recursive: true });
+    const outputPath = path.join(PROFILE_MEDIA_CACHE_DIR, `${cacheKey}-background.png`);
+    await new Promise<void>((resolve, reject) => {
+      execFile(
+        ffmpegPath,
+        [
+          "-hide_banner", "-loglevel", "error", "-y", "-i", inputPath,
+          "-vf", `scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=increase:flags=fast_bilinear,crop=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}`,
+          "-frames:v", "1", "-update", "1", "-compression_level", "1", outputPath,
+        ],
+        { windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024 },
+        (error) => {
+          if (error) reject(error);
+          else resolve();
+        }
+      );
+    });
+    return outputPath;
+  })();
+  xStyleBackgroundCache.set(cacheKey, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    xStyleBackgroundCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+async function composeXStyleBackground(
+  backgroundPath: string,
+  overlays: Array<{ path: string; x: number; y: number }>,
+  outputPath: string
+) {
+  if (overlays.length === 0) return backgroundPath;
+  if (!ffmpegStatic) throw new Error("FFmpeg não disponível para compor o template.");
+  const graph = ["[0:v]null[base]"];
+  for (const [index, overlay] of overlays.entries()) {
+    const input = index + 1;
+    const previous = index === 0 ? "[base]" : `[canvas${index - 1}]`;
+    const output = index === overlays.length - 1 ? "[canvas]" : `[canvas${index}]`;
+    graph.push(
+      `[${input}:v]format=rgba[text${index}]`,
+      `${previous}[text${index}]overlay=x=${overlay.x}:y=${overlay.y}:shortest=1${output}`
+    );
+  }
+  const args = ["-hide_banner", "-loglevel", "error", "-y", "-loop", "1", "-i", backgroundPath];
+  for (const overlay of overlays) args.push("-loop", "1", "-i", overlay.path);
+  args.push(
+    "-filter_complex", graph.join(";"), "-map", "[canvas]", "-frames:v", "1", "-update", "1",
+    "-compression_level", "1", outputPath
+  );
+  await new Promise<void>((resolve, reject) => {
+    execFile(ffmpegStatic!, args, { windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024 }, (error) => {
+      if (error) reject(error);
+      else resolve();
+    });
+  });
+  return outputPath;
+}
+
 function encoderOptions(useNvenc: boolean) {
   return useNvenc
     ? ["-c:v", "h264_nvenc", "-preset", "p2", "-rc", "vbr", "-cq", "27", "-b:v", "0"]
     : ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "27", "-threads", String(ENCODE_THREADS)];
+}
+
+// O cache da reação será recodificado no vídeo final. Mantê-lo em qualidade alta evita
+// que a segunda codificação torne visível a perda de uma compressão intermediária.
+function reactionCacheEncoderOptions(useNvenc: boolean) {
+  return useNvenc
+    ? ["-c:v", "h264_nvenc", "-preset", "p2", "-rc", "vbr", "-cq", "18", "-b:v", "0"]
+    : ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-threads", String(ENCODE_THREADS)];
 }
 
 function runOnce(
@@ -353,7 +459,7 @@ function runOnce(
     }
     outputOptions.push(
       "-filter_complex_threads",
-      "1",
+      String(FILTER_THREADS),
       ...encoderOptions(useNvenc),
       "-pix_fmt",
       "yuv420p",
@@ -395,7 +501,7 @@ async function createPingPongReaction(inputPath: string, outputPath: string, tar
         "-map",
         "[outv]",
         "-filter_complex_threads",
-        "1",
+        String(FILTER_THREADS),
         "-an",
         ...encoderOptions(useNvenc),
         "-pix_fmt",
@@ -474,6 +580,77 @@ async function getPingPongReactionPath(
     return await pending;
   } catch (error) {
     pingPongReactionCache.delete(cacheKey);
+    throw error;
+  }
+}
+
+/** Normaliza a reação em loop uma vez por mídia/perfil. Sem este cache, FFmpeg redimensiona
+ *  a mesma reação em todos os quadros de todos os vídeos do lote, mesmo quando dezenas deles
+ *  compartilham o mesmo arquivo. A saída tem o tamanho exato da faixa React e fica sem áudio. */
+async function getLoopReactionPath(
+  inputPath: string,
+  stableMediaId: string,
+  targetWidth: number,
+  targetHeight: number
+) {
+  const file = await stat(inputPath);
+  const cacheKey = createHash("sha256")
+    .update(`loop:${stableMediaId}:${file.size}:${file.mtimeMs}:${targetWidth}x${targetHeight}`)
+    .digest("hex");
+  const cachedPath = path.join(PING_PONG_CACHE_DIR, `${cacheKey}.mp4`);
+  const temporaryPath = path.join(PING_PONG_CACHE_DIR, `${cacheKey}.partial.mp4`);
+  if (existsSync(cachedPath)) return cachedPath;
+
+  const existing = loopReactionCache.get(cacheKey);
+  if (existing) return existing;
+
+  const pending = (async () => {
+    await mkdir(PING_PONG_CACHE_DIR, { recursive: true });
+    const renderOnce = (useNvenc: boolean) => new Promise<void>((resolve, reject) => {
+      const stderr: string[] = [];
+      ffmpeg(inputPath)
+        .complexFilter([
+          `[0:v]fps=30,scale=${targetWidth}:${targetHeight}:force_original_aspect_ratio=increase,crop=${targetWidth}:${targetHeight},setsar=1,setpts=PTS-STARTPTS[outv]`,
+        ])
+        .outputOptions([
+          "-map", "[outv]", "-an", "-filter_complex_threads", String(FILTER_THREADS),
+          ...reactionCacheEncoderOptions(useNvenc), "-pix_fmt", "yuv420p", "-movflags", "+faststart",
+        ])
+        .on("stderr", (line) => stderr.push(line))
+        .on("error", (error) => {
+          const detail = stderr.slice(-8).join(" ").trim();
+          reject(new Error(detail ? `${error.message} — ${detail}` : error.message));
+        })
+        .on("end", () => resolve())
+        .save(temporaryPath);
+    });
+
+    try {
+      if (!(await supportsNvenc())) {
+        await renderOnce(false);
+      } else {
+        try {
+          await renderOnce(true);
+        } catch (error) {
+          console.warn("[render] NVENC falhou ao preparar a reação em loop; usando CPU", error);
+          nvencDisabled = true;
+          await rm(cachedPath, { force: true });
+          await renderOnce(false);
+        }
+      }
+      await rename(temporaryPath, cachedPath);
+      return cachedPath;
+    } catch (error) {
+      await rm(temporaryPath, { force: true });
+      await rm(cachedPath, { force: true });
+      throw error;
+    }
+  })();
+  loopReactionCache.set(cacheKey, pending);
+  try {
+    return await pending;
+  } catch (error) {
+    loopReactionCache.delete(cacheKey);
     throw error;
   }
 }
@@ -573,7 +750,6 @@ async function renderReact(
   const overlay = item.manualOverrides.reactOverlay;
   let overlayPath: string | null = null;
   let reactionInputPath = reactionMedia.path;
-  let pingPongReaction = false;
   if (item.manualOverrides.reactionLoopMode === "pingpong") {
     reactionInputPath = await getPingPongReactionPath(
       reactionMedia.path,
@@ -581,7 +757,13 @@ async function renderReact(
       OUTPUT_WIDTH,
       topHeight
     );
-    pingPongReaction = true;
+  } else {
+    reactionInputPath = await getLoopReactionPath(
+      reactionMedia.path,
+      selectedReaction?.driveFileId ?? selectedReaction?.id ?? reactionUrl ?? reactionMedia.path,
+      OUTPUT_WIDTH,
+      topHeight
+    );
   }
   if (overlay?.enabled && overlay.text.trim()) {
     await ensureTextFont();
@@ -662,19 +844,19 @@ async function renderReact(
     await PImage.encodePNGToStream(image, createWriteStream(overlayPath));
   }
   const filterGraph = [
-    pingPongReaction
-      ? `[1:v]setsar=1,fps=30,setpts=PTS-STARTPTS[top]`
-      : `[1:v]scale=${OUTPUT_WIDTH}:${topHeight}:force_original_aspect_ratio=increase,crop=${OUTPUT_WIDTH}:${topHeight},setsar=1,fps=30,setpts=PTS-STARTPTS[top]`,
+    // Os dois modos chegam normalizados e em 30 fps; evita repetir scale/crop em cada item.
+    `[1:v]setsar=1,fps=30,setpts=PTS-STARTPTS[top]`,
     `[0:v]${contentFilters.join(",")},setsar=1,setpts=PTS-STARTPTS[bottom]`,
     `[top][bottom]vstack=inputs=2[base]`,
     ...(overlayPath
       ? [
           `[2:v]format=rgba,setsar=1,fps=30[overlay]`,
-          `[base][overlay]overlay=0:0:shortest=1[composed]`,
-          `[composed]scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,pad=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[outv]`,
+          // base e overlay já têm exatamente 1080x1920; uma segunda escala/pad aqui
+          // percorria todos os pixels do quadro sem alterar a composição.
+          `[base][overlay]overlay=0:0:shortest=1,setsar=1[outv]`,
         ]
       : [
-          `[base]scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=decrease,pad=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1[outv]`,
+          `[base]setsar=1[outv]`,
         ]),
   ];
   try {
@@ -891,41 +1073,50 @@ async function drawTextBlock(
   }
 }
 
-async function createXStyleTextOverlay(item: BatchItem, profile: Profile, outputPath: string) {
+async function createXStyleTextOverlays(item: BatchItem, profile: Profile, outputPath: string) {
   if (profile.engine !== "X_STYLE") return null;
 
   const layout = resolveXStyleLayout(profile.xStyleLayout);
   const title = item.manualOverrides.title || profile.defaultTitle || "";
   const color = profile.textColor ?? "black";
   await ensureTextFont();
-  const image = PImage.make(OUTPUT_WIDTH, OUTPUT_HEIGHT);
-  const ctx = image.getContext("2d");
-  ctx.clearRect(0, 0, OUTPUT_WIDTH, OUTPUT_HEIGHT);
-  await drawTextBlock(ctx, title, {
-    x: layout.title.x,
-    y: layout.title.y,
-    fontSize: layout.title.fontSize,
-    maxWidth: layout.title.maxWidth,
-    maxLines: layout.title.maxLines,
-    lineHeight: Math.round(layout.title.fontSize * 1.12),
-    weight: "bold",
-    color,
-  });
-  await drawTextBlock(ctx, item.manualOverrides.caption, {
-    x: layout.body.x,
-    y: layout.body.y,
-    fontSize: layout.body.fontSize,
-    maxWidth: layout.body.maxWidth,
-    maxLines: layout.body.maxLines,
-    lineHeight: Math.round(layout.body.fontSize * 1.12),
-    weight: "bold",
-    align: "center",
-    color,
-  });
+  const overlays: Array<{ path: string; x: number; y: number }> = [];
 
-  const overlayPath = outputPath.replace(/\.mp4$/i, "-text.png");
-  await PImage.encodePNGToStream(image, createWriteStream(overlayPath));
-  return overlayPath;
+  async function addTextLayer(
+    text: string,
+    box: { x: number; y: number; fontSize: number; maxWidth: number; maxLines: number },
+    suffix: "title" | "body",
+    align: "left" | "center" = "left"
+  ) {
+    if (!text.trim()) return;
+    const width = Math.max(1, Math.ceil(box.maxWidth));
+    const lineHeight = Math.round(box.fontSize * 1.12);
+    const height = Math.max(1, lineHeight * box.maxLines);
+    const image = PImage.make(width, height);
+    const ctx = image.getContext("2d");
+    ctx.clearRect(0, 0, width, height);
+    await drawTextBlock(ctx, text, {
+      x: 0,
+      y: 0,
+      fontSize: box.fontSize,
+      maxWidth: width,
+      maxLines: box.maxLines,
+      lineHeight,
+      weight: "bold",
+      align,
+      color,
+    });
+
+    const overlayPath = outputPath.replace(/\.mp4$/i, `-${suffix}.png`);
+    // Text layers are transient inputs for FFmpeg. Fast deflate is sufficient and
+    // avoids spending time maximizing compression on a file that is deleted at once.
+    await PImage.encodePNGToStream(image, createWriteStream(overlayPath), { deflateLevel: 1 });
+    overlays.push({ path: overlayPath, x: box.x, y: box.y });
+  }
+
+  await addTextLayer(title, layout.title, "title");
+  await addTextLayer(item.manualOverrides.caption, layout.body, "body", "center");
+  return overlays;
 }
 
 async function renderXStyle(
@@ -943,31 +1134,79 @@ async function renderXStyle(
   }
   if (!backgroundMedia) throw new Error("Template X Style não encontrado. Reimporte o template do perfil antes de exportar.");
 
+  let preparedBackgroundPath: string | null = null;
+  try {
+    preparedBackgroundPath = await prepareXStyleBackground(backgroundMedia.path);
+  } catch (error) {
+    // Keep the original renderer as a compatibility fallback for unusual image codecs.
+    console.warn("[render] Não foi possível normalizar o template X Style; usando escala no FFmpeg", error);
+  }
+
   const layout = resolveXStyleLayout(profile.xStyleLayout);
   const videoFrame = item.manualOverrides.xStyleVideoFrame ?? layout.video;
   const contentFilters = buildContentFilters(item, source, videoFrame.width, videoFrame.height);
-  const textOverlayPath = await createXStyleTextOverlay(item, profile, outputPath);
+  const textOverlays = await createXStyleTextOverlays(item, profile, outputPath) ?? [];
+  const outputLabel = textOverlays.length ? "[outv]" : "[xbase]";
   const filterGraph = [
-    `[1:v]scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}[bg]`,
+    preparedBackgroundPath
+      ? "[1:v]null[bg]"
+      : `[1:v]scale=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}:force_original_aspect_ratio=increase,crop=${OUTPUT_WIDTH}:${OUTPUT_HEIGHT}[bg]`,
     `[0:v]${contentFilters.join(",")}[content]`,
     `[bg][content]overlay=x=${videoFrame.x}:y=${videoFrame.y}:shortest=1[xbase]`,
-    ...(textOverlayPath
-      ? [`[2:v]format=rgba[text]`, `[xbase][text]overlay=0:0:shortest=1[outv]`]
-      : [`[xbase]null[outv]`]),
+    ...textOverlays.flatMap((overlay, index) => {
+      const inputIndex = index + 2;
+      const inputLabel = `[text${index}]`;
+      const output = index === textOverlays.length - 1 ? outputLabel : `[xtext${index}]`;
+      const base = index === 0 ? "[xbase]" : `[xtext${index - 1}]`;
+      return [
+        `[${inputIndex}:v]format=rgba${inputLabel}`,
+        `${base}${inputLabel}overlay=x=${overlay.x}:y=${overlay.y}:shortest=1${output}`,
+      ];
+    }),
+    ...(textOverlays.length ? [] : ["[xbase]null[outv]"]),
   ];
   try {
+    if (preparedBackgroundPath && (await supportsNvenc()) && (await supportsCudaOverlay())) {
+      const composedBackgroundPath = outputPath.replace(/\.mp4$/i, "-canvas.png");
+      try {
+        await composeXStyleBackground(preparedBackgroundPath, textOverlays, composedBackgroundPath);
+        const cudaFilterGraph = [
+          `[0:v]${contentFilters.join(",")},format=nv12,hwupload_cuda[content]`,
+          "[1:v]format=nv12,hwupload_cuda[bg]",
+          `[bg][content]overlay_cuda=x=${videoFrame.x}:y=${videoFrame.y}:shortest=1[outv]`,
+        ];
+        await runOnce(
+          [
+            { path: contentPath, options: contentInputOptions(item) },
+            { path: composedBackgroundPath, options: ["-framerate", "30", "-loop", "1"] },
+          ],
+          cudaFilterGraph,
+          outputPath,
+          item,
+          true
+        );
+        return;
+      } catch (error) {
+        console.warn("[render] Composição CUDA do X Style falhou; repetindo no modo compatível", error);
+        cudaOverlayDisabled = true;
+        await rm(outputPath, { force: true });
+      } finally {
+        await rm(composedBackgroundPath, { force: true });
+      }
+    }
+
     await run(
       [
         { path: contentPath, options: contentInputOptions(item) },
-        { path: backgroundMedia.path, options: ["-loop", "1"] },
-        ...(textOverlayPath ? [{ path: textOverlayPath, options: ["-loop", "1"] }] : []),
+        { path: preparedBackgroundPath ?? backgroundMedia.path, options: ["-loop", "1"] },
+        ...textOverlays.map(({ path: overlayPath }) => ({ path: overlayPath, options: ["-loop", "1"] })),
       ],
       filterGraph,
       outputPath,
       item
     );
   } finally {
-    if (textOverlayPath) await rm(textOverlayPath, { force: true });
+    await Promise.all(textOverlays.map(({ path: overlayPath }) => rm(overlayPath, { force: true })));
     await cleanupMaterializedMedia(backgroundMedia);
   }
 }

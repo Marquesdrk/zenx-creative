@@ -4,6 +4,7 @@ import { upload } from "@vercel/blob/client";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarClock, ChevronDown, HardDrive, List, Send, Upload, X } from "lucide-react";
 import { BEST_TIME_SLOTS, planSchedule } from "@/lib/scheduling/plan";
+import { CoverImagePicker } from "@/components/meta/cover-image-picker";
 import type { PublicSocialAccount } from "@/lib/server/meta/types";
 
 const IS_VERCEL = Boolean(process.env.NEXT_PUBLIC_IS_VERCEL);
@@ -57,6 +58,7 @@ export function ScheduledPostComposer({
   const [driveStatus, setDriveStatus] = useState<{ configured: boolean; connected: boolean } | null>(null);
   const [useDrive, setUseDrive] = useState(true);
   const [caption, setCaption] = useState("");
+  const [coverFile, setCoverFile] = useState<File | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [scheduledAt, setScheduledAt] = useState(() => toDatetimeLocal(new Date(Date.now() + 60 * 60_000)));
   const [submitting, setSubmitting] = useState<"schedule" | "now" | null>(null);
@@ -76,6 +78,7 @@ export function ScheduledPostComposer({
   const connectedAccounts = useMemo(() => accounts.filter((a) => a.status === "connected"), [accounts]);
   const instagramAccounts = connectedAccounts.filter((a) => a.platform === "INSTAGRAM");
   const facebookAccounts = connectedAccounts.filter((a) => a.platform === "FACEBOOK");
+  const youtubeAccounts = connectedAccounts.filter((a) => a.platform === "YOUTUBE");
   const driveAvailable = Boolean(driveStatus?.configured && driveStatus?.connected);
   const previewSchedule = useMemo(
     () => planSchedule(Math.max(0, videoFiles.length - 1), BEST_TIME_SLOTS.length, new Date(scheduledAt), BEST_TIME_SLOTS),
@@ -115,7 +118,8 @@ export function ScheduledPostComposer({
     file: File,
     mode: "schedule" | "now",
     selectedIds: string[],
-    scheduledFor: Date | null
+    scheduledFor: Date | null,
+    coverUrl: string | null
   ): Promise<{ ok: true } | { ok: false; error: string }> {
     let payload: Record<string, unknown>;
 
@@ -182,6 +186,7 @@ export function ScheduledPostComposer({
     return createScheduledPostWithRetry({
       ...payload,
       caption,
+      coverUrl,
       scheduledAt: mode === "now" ? null : scheduledFor!.toISOString(),
       socialAccountIds: selectedIds,
     });
@@ -198,6 +203,26 @@ export function ScheduledPostComposer({
     }
     setSubmitting(mode);
     setError(null);
+
+    let coverUrl: string | null = null;
+    if (coverFile) {
+      if (coverFile.size > 4 * 1024 * 1024) {
+        setSubmitting(null);
+        setError("A capa deve ter no máximo 4 MB.");
+        return;
+      }
+      const formData = new FormData();
+      formData.append("file", coverFile);
+      try {
+        const coverRes = await fetch("/api/upload", { method: "POST", body: formData });
+        if (!coverRes.ok) throw new Error("upload failed");
+        coverUrl = ((await coverRes.json()) as { url: string }).url;
+      } catch {
+        setSubmitting(null);
+        setError("Falha ao enviar a capa do vídeo.");
+        return;
+      }
+    }
 
     const selectedIds = Array.from(selected);
     const baseScheduledAt = new Date(scheduledAt);
@@ -216,7 +241,7 @@ export function ScheduledPostComposer({
       // padrão (08:00, 11:00, 13:00, 15:00, 17:00, 19:00 e 21:00), repetindo no dia seguinte.
       const testNow = mode === "now" || (mode === "schedule" && i === 0);
       const scheduledFor = testNow ? null : plannedSchedule[i - 1] ?? addDays(baseScheduledAt, i);
-      const result = await submitOneFile(videoFiles[i], testNow ? "now" : "schedule", selectedIds, scheduledFor);
+      const result = await submitOneFile(videoFiles[i], testNow ? "now" : "schedule", selectedIds, scheduledFor, coverUrl);
       if (!result.ok) {
         failedIndexes.add(i);
         failures.push(`${videoFiles[i].name}: ${result.error}`);
@@ -237,6 +262,7 @@ export function ScheduledPostComposer({
       setVideoFiles([]);
       setShowVideoFiles(false);
       setCaption("");
+      setCoverFile(null);
       setSelected(new Set());
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
@@ -336,6 +362,8 @@ export function ScheduledPostComposer({
         />
       </div>
 
+      <CoverImagePicker file={coverFile} onChange={setCoverFile} />
+
       <div className="mt-4">
         <p className="mb-1.5 text-[11px] font-semibold uppercase text-muted">Publicar em</p>
         {connectedAccounts.length === 0 ? (
@@ -349,6 +377,9 @@ export function ScheduledPostComposer({
             )}
             {facebookAccounts.length > 0 && (
               <AccountGroup label="Facebook" accounts={facebookAccounts} selected={selected} onToggle={toggle} />
+            )}
+            {youtubeAccounts.length > 0 && (
+              <AccountGroup label="YouTube (Shorts)" accounts={youtubeAccounts} selected={selected} onToggle={toggle} />
             )}
           </div>
         )}

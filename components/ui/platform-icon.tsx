@@ -9,7 +9,7 @@ const PLATFORM_STYLES: Record<string, string> = {
   KWAI: "bg-orange-500/15 text-orange-300",
 };
 
-export function PlatformIcon({ platform, size = "md" }: { platform: Platform | "INSTAGRAM" | "TIKTOK" | "FACEBOOK"; size?: "sm" | "md" }) {
+export function PlatformIcon({ platform, size = "md" }: { platform: Platform | "INSTAGRAM" | "TIKTOK" | "FACEBOOK" | "YOUTUBE"; size?: "sm" | "md" }) {
   const className = `${size === "sm" ? "h-6 w-6" : "h-9 w-9"} inline-flex shrink-0 items-center justify-center rounded-full ${
     PLATFORM_STYLES[platform] ?? "bg-white/10 text-white"
   }`;

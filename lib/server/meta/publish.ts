@@ -11,6 +11,8 @@ import {
 } from "./instagram";
 import { logMetaApiError, logMetaStep } from "./log";
 import { resolvePostVideoUrl } from "./video-source";
+import type { ScheduledPost, SocialPlatform } from "./types";
+import { publishYoutubeShort, YoutubePublishError } from "@/lib/server/youtube/client";
 
 const MAX_ATTEMPTS = 5;
 const BACKOFF_BASE_MS = 60_000; // 1min, 2min, 4min, 8min, 16min
@@ -22,6 +24,9 @@ function backoffDelayMs(attempt: number): number {
 type ClassifiedError = { code: string; message: string; recoverable: boolean; isAuthError: boolean };
 
 function classifyError(err: unknown): ClassifiedError {
+  if (err instanceof YoutubePublishError) {
+    return { code: err.code, message: err.message, recoverable: err.recoverable, isAuthError: err.isAuthError };
+  }
   if (err instanceof MetaGraphError) {
     return { code: err.errorCode, message: err.message, recoverable: err.isRecoverable, isAuthError: err.isAuthError };
   }
@@ -87,8 +92,10 @@ export async function processScheduledPostAccount(
   }
 
   try {
-    const videoUrl = resolvePostVideoUrl(post);
+    // YouTube envia os bytes direto pela API (sem URL pública) — só a Meta precisa da URL.
+    const videoUrl = account.platform === "YOUTUBE" ? "" : resolvePostVideoUrl(post);
     const outcome = await publishToAccount({
+      post,
       platform: account.platform,
       socialAccountId: account.id,
       accessToken,
@@ -187,7 +194,7 @@ async function finishFailed(
   spaId: string,
   postId: string,
   socialAccountId: string | null,
-  platform: "INSTAGRAM" | "FACEBOOK" | null,
+  platform: SocialPlatform | null,
   code: string,
   message: string
 ) {
@@ -213,7 +220,8 @@ async function finishFailed(
 }
 
 async function publishToAccount(params: {
-  platform: "INSTAGRAM" | "FACEBOOK";
+  post: ScheduledPost;
+  platform: SocialPlatform;
   socialAccountId: string;
   accessToken: string;
   instagramUserId: string | null;
@@ -225,6 +233,11 @@ async function publishToAccount(params: {
   mediaContainerId: string | null;
   deferInstagramProcessing: boolean;
 }): Promise<{ kind: "waiting"; mediaContainerId: string } | { kind: "published"; externalId: string }> {
+  if (params.platform === "YOUTUBE") {
+    // accessToken guarda o refresh token do canal (ver supabase/migrations/0008_youtube_accounts.sql).
+    const result = await publishYoutubeShort({ refreshToken: params.accessToken, post: params.post });
+    return { kind: "published", externalId: result.externalId };
+  }
   if (params.platform === "INSTAGRAM") {
     if (!params.instagramUserId) throw new Error("Conta Instagram sem instagram_user_id salvo — reconecte a conta.");
     const graphBase = params.authFlow === "instagram_login" ? INSTAGRAM_GRAPH_BASE : undefined;

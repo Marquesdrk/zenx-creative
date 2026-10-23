@@ -5,7 +5,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { BatchItem, Profile } from "@/lib/editor/types";
 import { renderBatchItem } from "@/lib/server/render";
-import { deletePublicUrl, generatedFileUrl, generatedFolder, publicUrlToPath, sanitizeFilename } from "@/lib/server/public-files";
+import { deletePublicUrl, generatedFileUrl, generatedFolder, publicUrlToPath } from "@/lib/server/public-files";
 import { createZip, writeZipArchive, zipArchiveFilename, zipVideoFilename } from "@/lib/server/zip";
 import { socialAccountsRepo } from "@/lib/server/meta/db";
 import { uploadScheduledVideoToDrive } from "@/lib/server/google-drive";
@@ -13,6 +13,16 @@ import { uploadScheduledVideoToDrive } from "@/lib/server/google-drive";
 export const runtime = "nodejs";
 export const maxDuration = 300;
 const MAX_PARALLEL_RENDERS = 1;
+
+function temporaryVideoFilename(originalFilename: string) {
+  const extension = path.extname(originalFilename).toLowerCase();
+  const safeExtension = /^\.[a-z0-9]{1,8}$/.test(extension) ? extension : ".mp4";
+  // Temporary paths are consumed by FFmpeg on Windows. Keeping the original (often
+  // hashtag-heavy) title here can push the absolute path past MAX_PATH and make ffprobe
+  // report ENOENT even though the multipart upload succeeded. The final ZIP still uses
+  // the original filename; only this private intermediate file gets a short random name.
+  return `${randomUUID()}${safeExtension}`;
+}
 
 type ExportPayload = {
   batchId: string;
@@ -29,10 +39,10 @@ function isPayload(value: unknown): value is ExportPayload {
   return Boolean(payload.batchId && payload.profile && Array.isArray(payload.items));
 }
 
-async function persistUploadedFile(file: File, itemId: string) {
+async function persistUploadedFile(file: File) {
   const uploadDir = generatedFolder("uploads");
   await mkdir(uploadDir, { recursive: true });
-  const storedFilename = `${itemId}-${sanitizeFilename(file.name || "video.mp4")}`;
+  const storedFilename = temporaryVideoFilename(file.name || "video.mp4");
   const storedPath = path.join(uploadDir, storedFilename);
   await writeFile(storedPath, Buffer.from(await file.arrayBuffer()));
   return generatedFileUrl("uploads", storedFilename);
@@ -50,7 +60,7 @@ async function persistBlobFile(item: ExportPayload["items"][number]) {
 
   const uploadDir = generatedFolder("uploads");
   await mkdir(uploadDir, { recursive: true });
-  const storedFilename = `${item.id}-${sanitizeFilename(item.filename || "video.mp4")}`;
+  const storedFilename = temporaryVideoFilename(item.filename || "video.mp4");
   const storedPath = path.join(uploadDir, storedFilename);
   await writeFile(storedPath, Buffer.from(await new Response(blob.stream).arrayBuffer()));
   return generatedFileUrl("uploads", storedFilename);
@@ -140,7 +150,7 @@ export async function POST(request: Request) {
         if (!(file instanceof File)) {
           throw new Error(`Arquivo original ausente: ${item.filename}`);
         }
-        contentUrl = await persistUploadedFile(file, item.id);
+        contentUrl = await persistUploadedFile(file);
       }
 
       temporaryUrls.push(contentUrl);

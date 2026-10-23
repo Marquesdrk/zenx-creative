@@ -47,7 +47,9 @@ export function SocialAccountRow({
               ? `@${account.username.replace(/^@/, "")}`
               : account.platform === "FACEBOOK"
                 ? "Página do Facebook"
-                : ""}
+                : account.platform === "YOUTUBE"
+                  ? "Canal do YouTube"
+                  : ""}
           </p>
           {needsReconnect && account.lastError && (
             <p className="mt-0.5 truncate text-[11px] text-red-300">{account.lastError}</p>

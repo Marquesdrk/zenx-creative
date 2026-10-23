@@ -59,6 +59,8 @@ export async function POST(request: Request) {
         metadata: { category: page.category },
       });
       connectedIds.push(account.id);
+      // Também prepara a pasta da Página: ela é a origem dos vídeos no agendamento em lote.
+      ensureScheduledVideosFolder(account.accountName).catch(() => {});
       logMetaStep("META_ACCOUNT_SAVED", { socialAccountId: account.id, metadata: { platform: "FACEBOOK", pageId: page.pageId } });
       await publicationLogsRepo.create({
         userId: null,
@@ -78,6 +80,14 @@ export async function POST(request: Request) {
     if (kind === "instagram") {
       const page = session.discovered.find((p) => p.instagram?.id === assetId);
       if (!page?.instagram) {
+        skipped.push(key);
+        continue;
+      }
+      // Conta já conectada pelo "Conectar Instagram" (Instagram Login) tem token e host próprios
+      // (graph.instagram.com) — regravar por aqui trocaria o token pelo da Página e apagaria o
+      // authFlow, quebrando a publicação. Nunca sobrescreve.
+      const existing = await socialAccountsRepo.findByPlatformAccountId("INSTAGRAM", page.instagram.id);
+      if (existing?.metadata.authFlow === "instagram_login") {
         skipped.push(key);
         continue;
       }

@@ -38,6 +38,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     );
   }
 
+  if (account.platform === "YOUTUBE") {
+    return NextResponse.json({ error: "Reel de teste só existe para Instagram/Facebook — para o YouTube, agende um Short." }, { status: 400 });
+  }
+
   const accessToken = await socialAccountsRepo.getAccessToken(id);
   if (!accessToken) {
     return NextResponse.json({ error: "Token de acesso ausente para esta conta." }, { status: 409 });

@@ -1,11 +1,11 @@
 /** Tipos de domínio da integração com a Meta (Instagram + Facebook) e do agendamento
  *  multi-conta. Ver docs/META_INTEGRATION_SETUP.md para o desenho geral da arquitetura. */
 
-export type SocialPlatform = "INSTAGRAM" | "FACEBOOK";
+export type SocialPlatform = "INSTAGRAM" | "FACEBOOK" | "YOUTUBE";
 
 export type SocialAccountStatus = "connected" | "expired" | "revoked" | "error";
 
-/** Uma conta social conectada (uma Página do Facebook OU uma conta profissional do
+/** Uma conta social conectada (uma Página do Facebook, um canal do YouTube OU uma conta profissional do
  *  Instagram vinculada a uma Página) — cada conexão é uma linha independente, nunca colunas
  *  tipo instagram_1/instagram_2. */
 export type SocialAccount = {

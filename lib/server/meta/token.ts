@@ -4,6 +4,7 @@ import { graphFetch, graphUrl, MetaGraphError } from "./graph-client";
 import { logMetaApiError, logMetaStep } from "./log";
 import { fetchInstagramProfile } from "./instagram-auth";
 import type { GraphDebugTokenResponse } from "./types";
+import { checkYoutubeRefreshToken } from "@/lib/server/youtube/client";
 
 export type TokenCheckResult = { valid: boolean; reason?: string; scopes?: string[] };
 
@@ -22,6 +23,16 @@ export async function checkAccountToken(socialAccountId: string): Promise<TokenC
   if (!token) {
     await socialAccountsRepo.updateStatus(socialAccountId, "revoked", { lastError: "Token ausente." });
     return { valid: false, reason: "Token ausente." };
+  }
+
+  if (account.platform === "YOUTUBE") {
+    const check = await checkYoutubeRefreshToken(token);
+    if (check.valid) {
+      await socialAccountsRepo.updateStatus(socialAccountId, "connected", { lastError: null });
+      return { valid: true, scopes: account.permissions };
+    }
+    await socialAccountsRepo.updateStatus(socialAccountId, "expired", { lastError: check.reason ?? "Token inválido." });
+    return { valid: false, reason: check.reason, scopes: account.permissions };
   }
 
   const isInstagramLogin = account.metadata.authFlow === "instagram_login";

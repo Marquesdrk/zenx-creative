@@ -28,8 +28,9 @@ export function DiscoveryPicker({ sessionId, onConnected }: { sessionId: string;
       .then((data) => {
         if (cancelled) return;
         setSummary(data);
-        // Pré-marca só o que ainda não está conectado, pra não reconectar sem querer algo já ativo.
-        setSelected(new Set(data.assets.filter((a) => !a.alreadyConnected).map((a) => a.key)));
+        // Pré-marca só Páginas ainda não conectadas. Contas do Instagram são independentes das
+        // Páginas (conectadas por "Conectar Instagram"), então aqui ficam opt-in.
+        setSelected(new Set(data.assets.filter((a) => a.platform === "FACEBOOK" && !a.alreadyConnected).map((a) => a.key)));
       })
       .catch((err) => !cancelled && setError(err instanceof Error ? err.message : "Falha ao carregar ativos."));
     return () => {

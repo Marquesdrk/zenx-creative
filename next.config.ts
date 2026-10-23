@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // O scheduler local vive no processo Node persistente e é iniciado por instrumentation.ts.
   // Só a Vercel injeta VERCEL=1 no build/runtime, e só no servidor — expõe pro client também
   // porque o editor decide ali se usa o Vercel Blob como ponte pro vídeo original (necessário
   // só pra contornar o limite de payload das functions da Vercel; localmente não existe esse

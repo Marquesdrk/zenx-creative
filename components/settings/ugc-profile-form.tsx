@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { WatermarkCanvas } from "@/components/editor/watermark-canvas";
 import { GLOBAL_WATERMARK_DEFAULTS } from "@/lib/editor/settings";
 import { uploadFile } from "@/lib/editor/upload-file";
@@ -18,6 +18,8 @@ export function UgcProfileForm({
   onChangeTemplate: (template: UgcTemplate) => void;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [imageError, setImageError] = useState<string | null>(null);
   const usingGlobalDefault = !template.watermarkDefaults;
   const watermark = template.watermarkDefaults ?? GLOBAL_WATERMARK_DEFAULTS;
 
@@ -28,8 +30,17 @@ export function UgcProfileForm({
   async function handleImageSelected(files: FileList | null) {
     const file = files?.[0];
     if (!file) return;
-    const url = await uploadFile(file);
-    onChangeProfile({ ...profile, watermarkImageUrl: url });
+    setUploadingImage(true);
+    setImageError(null);
+    try {
+      const url = await uploadFile(file);
+      onChangeProfile({ ...profile, watermarkImageUrl: url });
+    } catch (cause) {
+      setImageError(cause instanceof Error ? cause.message : "Não foi possível enviar a imagem.");
+    } finally {
+      setUploadingImage(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   }
 
   return (
@@ -55,9 +66,10 @@ export function UgcProfileForm({
           <button
             type="button"
             onClick={() => fileInputRef.current?.click()}
-            className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground hover:bg-card-hover"
+            disabled={uploadingImage}
+            className="rounded-lg border border-border bg-background px-3 py-1.5 text-xs text-foreground hover:bg-card-hover disabled:cursor-not-allowed disabled:opacity-50"
           >
-            Enviar imagem
+            {uploadingImage ? "Enviando…" : "Enviar imagem"}
           </button>
           <input
             ref={fileInputRef}
@@ -67,6 +79,7 @@ export function UgcProfileForm({
             onChange={(event) => handleImageSelected(event.target.files)}
           />
         </div>
+        {imageError && <p role="alert" className="mt-2 text-xs text-red-300">{imageError}</p>}
       </div>
 
       <div className="border-t border-border pt-5">
