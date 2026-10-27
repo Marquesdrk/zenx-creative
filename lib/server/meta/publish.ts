@@ -1,6 +1,6 @@
 import { deleteDriveFile } from "@/lib/server/google-drive";
 import { publicationLogsRepo, scheduledPostAccountsRepo, scheduledPostsRepo, socialAccountsRepo } from "@/lib/server/meta/db";
-import { publishFacebookReel } from "./facebook";
+import { publishFacebookPageVideo } from "./facebook";
 import { MetaGraphError, MetaNetworkError } from "./graph-client";
 import { INSTAGRAM_GRAPH_BASE } from "./config";
 import {
@@ -304,14 +304,16 @@ async function publishToAccount(params: {
     return { kind: "published", externalId: result.externalId };
   }
   if (!params.pageId) throw new Error("Conta Facebook sem page_id salvo — reconecte a conta.");
-  const result = await publishFacebookReel({
+  const result = await publishFacebookPageVideo({
     pageId: params.pageId,
     pageAccessToken: params.accessToken,
     videoUrl: params.videoUrl,
-    caption: params.caption,
-    onEvent: (step, metadata) => logMetaStep(step, { socialAccountId: params.socialAccountId, metadata }),
+    description: params.caption,
   });
-  logMetaStep("META_MEDIA_PUBLISHED", { socialAccountId: params.socialAccountId, metadata: { videoId: result.externalId, platform: "FACEBOOK" } });
+  logMetaStep("META_MEDIA_PUBLISHED", {
+    socialAccountId: params.socialAccountId,
+    metadata: { videoId: result.externalId, platform: "FACEBOOK", publicationFormat: "PAGE_VIDEO" },
+  });
   return { kind: "published", externalId: result.externalId };
 }
 

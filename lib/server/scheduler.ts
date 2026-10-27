@@ -4,6 +4,9 @@ import { processScheduledPostAccount } from "@/lib/server/meta/publish";
 // Quantos destinos processar em paralelo por rodada do scheduler — mantém boa vazão com
 // 30-100 contas conectadas sem disparar tudo de uma vez contra a Graph API (rate limit).
 const CONCURRENCY = 5;
+// Limita cada chamada do cron a um lote curto: o endpoint e o pg_net do Supabase têm timeout
+// de 60s. O próximo minuto continua os demais destinos vencidos.
+const MAX_PER_RUN = 5;
 
 /** Ponto de entrada do agendador: busca no Supabase os destinos "due" — agendados pra agora
  *  (ou antes) e ainda não processados, incluindo retries cujo next_attempt_at já passou — e
@@ -17,7 +20,7 @@ const CONCURRENCY = 5;
  *  coisa duas vezes. */
 export async function runDueScheduledPosts(): Promise<{ processed: number }> {
   const now = new Date().toISOString();
-  const due = await scheduledPostAccountsRepo.listDue(now);
+  const due = (await scheduledPostAccountsRepo.listDue(now)).slice(0, MAX_PER_RUN);
   if (due.length === 0) return { processed: 0 };
 
   let cursor = 0;

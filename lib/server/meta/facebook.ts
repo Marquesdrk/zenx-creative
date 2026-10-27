@@ -6,7 +6,17 @@ type StepEvent = (step: MetaIntegrationStep, metadata?: Record<string, unknown>)
 
 type StartReelResponse = { video_id: string; upload_url: string };
 type FinishReelResponse = { success?: boolean };
-type VideoStatusResponse = { status?: { video_status?: string } };
+type VideoStatusResponse = {
+  status?: {
+    video_status?: string;
+    uploading_phase?: Record<string, unknown>;
+    processing_phase?: Record<string, unknown>;
+    publishing_phase?: Record<string, unknown>;
+  };
+  permalink_url?: string;
+  published?: boolean;
+};
+type PageVideoResponse = { id?: string };
 
 /** Passo 1 do fluxo oficial de Reels em Página (Video API — video_reels): abre a sessão de
  *  upload e recebe o video_id + a URL de upload assinada. */
@@ -79,6 +89,55 @@ export async function checkFacebookVideoStatus(videoId: string, pageAccessToken:
 }
 
 export type PublishFacebookReelResult = { externalId: string };
+
+/** Publica um vídeo comum no feed da Página. Diferente de /video_reels, este endpoint aceita
+ *  vídeos mais longos que o limite de Reels. A Meta busca o MP4 diretamente pela URL assinada. */
+export async function publishFacebookPageVideo(params: {
+  pageId: string;
+  pageAccessToken: string;
+  videoUrl: string;
+  description: string;
+}): Promise<{ externalId: string }> {
+  const url = graphUrl(GRAPH_BASE, `${params.pageId}/videos`, {});
+  const body = new URLSearchParams({
+    access_token: params.pageAccessToken,
+    file_url: params.videoUrl,
+    description: params.description,
+  });
+  const data = await graphFetch<PageVideoResponse>(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: body.toString(),
+  // O Supabase Cron tem timeout HTTP de 60s; devolva margem para registrar o resultado no banco.
+  }, 45_000);
+  if (!data.id) throw new Error("A Meta não retornou o ID do vídeo da Página.");
+  return { externalId: data.id };
+}
+
+/** Confirma o estado de processamento/publicação de um vídeo comum da Página. */
+export async function getFacebookPageVideoStatus(videoId: string, pageAccessToken: string): Promise<{
+  status: string | null;
+  phases: Pick<NonNullable<VideoStatusResponse["status"]>, "uploading_phase" | "processing_phase" | "publishing_phase">;
+  permalinkUrl: string | null;
+  published: boolean | null;
+}> {
+  try {
+    const url = graphUrl(GRAPH_BASE, videoId, { fields: "status,permalink_url,published", access_token: pageAccessToken });
+    const data = await graphFetch<VideoStatusResponse>(url);
+    return {
+      status: data.status?.video_status ?? null,
+      phases: {
+        uploading_phase: data.status?.uploading_phase,
+        processing_phase: data.status?.processing_phase,
+        publishing_phase: data.status?.publishing_phase,
+      },
+      permalinkUrl: data.permalink_url ?? null,
+      published: typeof data.published === "boolean" ? data.published : null,
+    };
+  } catch {
+    return { status: null, phases: {}, permalinkUrl: null, published: null };
+  }
+}
 
 /** Fluxo completo (start → transfer por URL → finish) parametrizado por Página — cada
  *  publicação usa o Page Access Token daquela conta específica, nunca uma variável global.
