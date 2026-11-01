@@ -468,8 +468,10 @@ export default function EditorPage() {
       } else {
         let rendered = stagedItemIds.length;
         const failures: Array<{ filename: string; message: string }> = [];
-        for (const item of batchItems) {
-          if (stagedItemIds.includes(item.id)) continue;
+        // Vários vídeos renderizam ao mesmo tempo: um de cada vez deixava CPU/GPU ociosa entre
+        // o upload, o ffprobe e a codificação de cada item (a principal causa da lentidão).
+        const pendingItems = batchItems.filter((item) => !stagedItemIds.includes(item.id));
+        await mapWithConcurrency(pendingItems, MAX_PARALLEL_RENDERS, async (item) => {
           try {
             const file = fileRefs.get(item.id);
             if (!file) throw new Error(`Arquivo original ausente: ${item.filename}`);
@@ -493,7 +495,7 @@ export default function EditorPage() {
             });
           }
           setExportProgressLabel(`Renderizados ${rendered}/${batchItems.length} · falhas ${failures.length}`);
-        }
+        });
 
         const readyItems = batchItems.filter((item) => stagedItemIds.includes(item.id));
         if (readyItems.length === 0) {
