@@ -16,6 +16,29 @@ const accounts: PublicSocialAccount[] = [
   { id: "orphan", userId: null, projectId: null, platform: "INSTAGRAM", platformAccountId: "orphan", pageId: null, instagramUserId: "orphan", accountName: "Conta sem vínculo", username: "semvinculo", profilePictureUrl: null, status: "connected", metaUserId: null, permissions: [], tokenExpiresAt: null, lastCheckedAt: null, lastError: null, metadata: {}, createdAt: now.toISOString(), updatedAt: now.toISOString() },
 ];
 
+describe("buildContentCoverageReport — perfis duplicados", () => {
+  it("junta cópias do mesmo perfil e liga a conta social e os vídeos a uma linha só", () => {
+    const duplicated: Profile[] = [
+      { id: "m1", name: "Mentalizando Resenha", engine: "X_STYLE", templateId: "x", handle: "@ mentalizandoresenha", avatarUrl: null, verified: true, editorialTone: "" },
+      { id: "m2", name: "Mentalizando Resenha", engine: "X_STYLE", templateId: "x", handle: "@mentalizandoresenha", avatarUrl: null, verified: true, editorialTone: "" },
+    ];
+    const account = { ...accounts[0], id: "ig-m", platformAccountId: "ig-m", accountName: "Mentalizando Resenha", username: "mentalizandoresenha" };
+    const post = { id: "pm", userId: null, videoUrl: null, videoSource: "drive", driveFileId: "f", driveFileName: "f.mp4", caption: "", scheduledAt: "2026-09-20T14:00:00.000Z", status: "scheduled", createdAt: now.toISOString(), updatedAt: now.toISOString() } as ScheduledPost;
+    const target: ScheduledPostAccount = { id: "t", scheduledPostId: "pm", socialAccountId: "ig-m", status: "scheduled", externalPostId: null, mediaContainerId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 0, nextAttemptAt: null, publishedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() };
+
+    const report = buildContentCoverageReport({
+      profiles: duplicated, batches: [], items: [], publications: [],
+      scheduledPosts: [post], scheduledPostAccounts: [target], socialAccounts: [account], now,
+    });
+
+    expect(report.profiles).toHaveLength(1);
+    expect(report.profiles[0]).toMatchObject({ profileName: "Mentalizando Resenha", scheduledVideos: 1 });
+    expect(report.profiles[0].accounts).toHaveLength(1);
+    expect(report.mergedDuplicateProfiles).toEqual(["Mentalizando Resenha"]);
+    expect(report.unmatchedScheduledVideos).toBe(0);
+  });
+});
+
 describe("buildContentCoverageReport", () => {
   it("counts unique scheduled videos per profile, includes legacy schedules and leaves empty profiles visible", () => {
     const batches: Batch[] = [{ id: "batch", profileId: "julia", engine: "REACT", createdAt: now.toISOString() }];
@@ -33,12 +56,12 @@ describe("buildContentCoverageReport", () => {
       { id: "orphan-post", userId: null, videoUrl: null, videoSource: "drive", driveFileId: "file2", driveFileName: "other.mp4", caption: "", scheduledAt: "2026-09-21T14:00:00.000Z", status: "scheduled", createdAt: now.toISOString(), updatedAt: now.toISOString() },
     ];
     const postAccounts: ScheduledPostAccount[] = [
-      { id: "post-ig", scheduledPostId: "post", socialAccountId: "ig", status: "scheduled", externalPostId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 0, nextAttemptAt: null, publishedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() },
-      { id: "post-fb", scheduledPostId: "post", socialAccountId: "fb", status: "scheduled", externalPostId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 0, nextAttemptAt: null, publishedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() },
-      { id: "posted-ig", scheduledPostId: "already-posted", socialAccountId: "ig", status: "published", externalPostId: "external-1", errorCode: null, errorMessage: null, recoverable: null, attemptCount: 1, nextAttemptAt: null, publishedAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() },
-      { id: "posted-fb", scheduledPostId: "already-posted", socialAccountId: "fb", status: "published", externalPostId: "external-2", errorCode: null, errorMessage: null, recoverable: null, attemptCount: 1, nextAttemptAt: null, publishedAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() },
-      { id: "post-cancelled", scheduledPostId: "post", socialAccountId: "ig", status: "cancelled", externalPostId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 0, nextAttemptAt: null, publishedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() },
-      { id: "orphan-target", scheduledPostId: "orphan-post", socialAccountId: "orphan", status: "scheduled", externalPostId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 0, nextAttemptAt: null, publishedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() },
+      { id: "post-ig", scheduledPostId: "post", socialAccountId: "ig", status: "scheduled", externalPostId: null, mediaContainerId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 0, nextAttemptAt: null, publishedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() },
+      { id: "post-fb", scheduledPostId: "post", socialAccountId: "fb", status: "scheduled", externalPostId: null, mediaContainerId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 0, nextAttemptAt: null, publishedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() },
+      { id: "posted-ig", scheduledPostId: "already-posted", socialAccountId: "ig", status: "published", externalPostId: "external-1", mediaContainerId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 1, nextAttemptAt: null, publishedAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() },
+      { id: "posted-fb", scheduledPostId: "already-posted", socialAccountId: "fb", status: "published", externalPostId: "external-2", mediaContainerId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 1, nextAttemptAt: null, publishedAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() },
+      { id: "post-cancelled", scheduledPostId: "post", socialAccountId: "ig", status: "cancelled", externalPostId: null, mediaContainerId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 0, nextAttemptAt: null, publishedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() },
+      { id: "orphan-target", scheduledPostId: "orphan-post", socialAccountId: "orphan", status: "scheduled", externalPostId: null, mediaContainerId: null, errorCode: null, errorMessage: null, recoverable: null, attemptCount: 0, nextAttemptAt: null, publishedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() },
     ];
 
     const report = buildContentCoverageReport({

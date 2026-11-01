@@ -237,8 +237,8 @@ export function ScheduledPostComposer({
     const failedIndexes = new Set<number>();
     for (let i = 0; i < videoFiles.length; i += 1) {
       setProgressLabel(videoFiles.length > 1 ? `Enviando ${i + 1}/${videoFiles.length}` : null);
-      // No planejamento, o primeiro vídeo é um teste imediato. Os demais seguem os 7 horários
-      // padrão (08:00, 11:00, 13:00, 15:00, 17:00, 19:00 e 21:00), repetindo no dia seguinte.
+      // No planejamento, o primeiro vídeo é um teste imediato. Os demais seguem até 15 horários
+      // padrão entre 08:00 e 22:00, repetindo no dia seguinte.
       const testNow = mode === "now" || (mode === "schedule" && i === 0);
       const scheduledFor = testNow ? null : plannedSchedule[i - 1] ?? addDays(baseScheduledAt, i);
       const result = await submitOneFile(videoFiles[i], testNow ? "now" : "schedule", selectedIds, scheduledFor, coverUrl);
@@ -397,7 +397,7 @@ export function ScheduledPostComposer({
         </label>
         {videoFiles.length > 1 && (
           <p className="mt-1.5 text-[11px] normal-case text-gray-400">
-            {videoFiles.length} vídeos → 1 teste agora e até 7 por dia nos horários padrão, começando em{" "}
+            {videoFiles.length} vídeos → 1 teste agora e até 15 por dia nos horários padrão, começando em{" "}
             {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(new Date(scheduledAt))} (até{" "}
             {new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short" }).format(
               previewSchedule[previewSchedule.length - 1] ?? new Date(scheduledAt)
@@ -406,8 +406,8 @@ export function ScheduledPostComposer({
           </p>
         )}
         <p className="mt-1.5 text-[11px] normal-case text-gray-400">
-          Ao agendar, o primeiro vídeo será publicado imediatamente como teste; os demais seguirão os horários padrão
-          (08:00, 11:00, 13:00, 15:00, 17:00, 19:00 e 21:00), começando na data escolhida.
+          Ao agendar, o primeiro vídeo será publicado imediatamente como teste; os demais poderão ocupar até 15 horários
+          padrão entre 08:00 e 22:00, começando na data escolhida.
         </p>
       </div>
 

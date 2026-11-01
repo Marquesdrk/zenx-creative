@@ -62,7 +62,7 @@ export function SocialAccountRow({
         </span>
         {needsReconnect && (
           <a
-            href="/api/meta/auth"
+            href={account.platform === "FACEBOOK" ? "/api/meta/pages/auth?switch_account=1" : "/api/meta/auth?switch_account=1"}
             className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-[#171717] px-2 text-[11px] font-semibold text-gray-200 hover:bg-card-hover"
           >
             <RefreshCw size={12} />

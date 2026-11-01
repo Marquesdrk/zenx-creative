@@ -228,10 +228,22 @@ function ContasMetaContent() {
       <Topbar
         searchPlaceholder="Buscar contas..."
         action={
-          <a href="/api/meta/instagram/auth" className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent-2 px-4 text-sm font-semibold text-white">
-            <Plus size={16} />
-            Conectar Instagram
-          </a>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <a
+              href="/api/meta/instagram/auth"
+              className="inline-flex h-10 items-center gap-2 rounded-lg bg-gradient-to-r from-accent to-accent-2 px-4 text-sm font-semibold text-white"
+            >
+              <Plus size={16} />
+              Conectar Instagram
+            </a>
+            <a
+              href="/api/meta/pages/auth"
+              className="inline-flex h-10 items-center gap-2 rounded-lg border border-border bg-card/80 px-4 text-sm font-semibold text-foreground transition hover:bg-card-hover"
+            >
+              <Plus size={16} />
+              Conectar Página Facebook
+            </a>
+          </div>
         }
       />
       <PageHeader title="Contas conectadas" description="Gerencie todas as suas contas de redes sociais conectadas às suas marcas." />
@@ -410,7 +422,7 @@ function ContasMetaContent() {
             <div className="border-b border-border px-4 py-4 text-sm font-semibold text-foreground">Ações rápidas</div>
             <div className="p-2">
               <div className="flex items-center gap-3 rounded-lg p-3 text-muted"><PlatformIcon platform="TIKTOK" /><span className="text-sm font-semibold">Conectar TikTok</span></div>
-              <a href="/api/meta/auth" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><PlatformIcon platform="FACEBOOK" /><span className="text-sm font-semibold text-foreground">Conectar Facebook</span></a>
+              <a href="/api/meta/pages/auth" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><PlatformIcon platform="FACEBOOK" /><span className="text-sm font-semibold text-foreground">Conectar Facebook</span></a>
               <a href="/api/youtube/auth" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><PlatformIcon platform="YOUTUBE" /><span className="text-sm font-semibold text-foreground">Conectar YouTube</span></a>
               <a href="/configuracoes" className="flex items-center gap-3 rounded-lg p-3 hover:bg-white/[0.04]"><AlertTriangle size={20} className="text-[#9B8CFF]" /><span className="text-sm font-semibold text-foreground">Gerenciar integrações</span></a>
             </div>

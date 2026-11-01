@@ -97,7 +97,7 @@ export function XStyleProfileForm({
           {templateError && <p role="alert" className="text-xs text-red-300">{templateError}</p>}
           <div>
             <p className="mb-1.5 text-xs text-muted">Cor do título e do texto abaixo do vídeo</p>
-            <div className="flex gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
                 aria-pressed={(profile.textColor ?? "black") === "black"}
@@ -124,8 +124,22 @@ export function XStyleProfileForm({
                 <span className="h-3 w-3 rounded-full border border-border bg-white" />
                 Branco
               </button>
+              <button
+                type="button"
+                aria-pressed={profile.textColor === "none"}
+                onClick={() => onChange({ ...profile, textColor: "none" })}
+                className={`flex min-h-9 items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold ${
+                  profile.textColor === "none"
+                    ? "border-accent bg-card-hover text-foreground"
+                    : "border-border bg-background text-gray-300"
+                }`}
+              >
+                Sem textos
+              </button>
             </div>
-            <p className="mt-1.5 text-[11px] text-muted">Use branco em templates de fundo escuro.</p>
+            <p className="mt-1.5 text-[11px] text-muted">
+              Use branco em templates escuros. “Sem textos” remove o título e o texto abaixo do vídeo.
+            </p>
           </div>
         </div>
       </div>

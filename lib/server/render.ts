@@ -1075,6 +1075,7 @@ async function drawTextBlock(
 
 async function createXStyleTextOverlays(item: BatchItem, profile: Profile, outputPath: string) {
   if (profile.engine !== "X_STYLE") return null;
+  if (profile.textColor === "none") return [];
 
   const layout = resolveXStyleLayout(profile.xStyleLayout);
   const title = item.manualOverrides.title || profile.defaultTitle || "";

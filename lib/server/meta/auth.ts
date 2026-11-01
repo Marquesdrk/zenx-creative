@@ -4,6 +4,10 @@ import {
   getMetaAppId,
   getMetaAppSecret,
   getMetaLoginConfigId,
+  getMetaPagesAppId,
+  getMetaPagesAppSecret,
+  getMetaPagesLoginConfigId,
+  getMetaPagesRedirectUri,
   getMetaOAuthScopes,
   getMetaRedirectUri,
   isMetaPublishMode,
@@ -17,15 +21,18 @@ import type { GraphMeResponse, GraphOAuthTokenResponse } from "./types";
  *  de trocar o `code` por qualquer token). */
 type AuthorizationOptions = {
   forceAccountSelection?: boolean;
+  pagesOnly?: boolean;
 };
 
 export function buildAuthorizationUrl(state: string, options: AuthorizationOptions = {}): string {
   const url = new URL(OAUTH_DIALOG_URL);
-  url.searchParams.set("client_id", getMetaAppId());
-  url.searchParams.set("redirect_uri", getMetaRedirectUri());
+  const appId = options.pagesOnly ? getMetaPagesAppId() : getMetaAppId();
+  const redirectUri = options.pagesOnly ? getMetaPagesRedirectUri() : getMetaRedirectUri();
+  url.searchParams.set("client_id", appId);
+  url.searchParams.set("redirect_uri", redirectUri);
   url.searchParams.set("state", state);
   url.searchParams.set("response_type", "code");
-  const configId = getMetaLoginConfigId();
+  const configId = options.pagesOnly ? getMetaPagesLoginConfigId() : getMetaLoginConfigId();
   if (configId) {
     url.searchParams.set("config_id", configId);
     url.searchParams.set("override_default_response_type", "true");
@@ -44,11 +51,11 @@ export type ExchangedToken = { accessToken: string; expiresAt: string | null };
 
 /** Passo 1 pós-autorização: troca o `code` (de uso único, de curta duração) pelo token de
  *  usuário de curta duração. */
-export async function exchangeCodeForToken(code: string): Promise<ExchangedToken> {
+export async function exchangeCodeForToken(code: string, options: { pagesOnly?: boolean } = {}): Promise<ExchangedToken> {
   const url = graphUrl(GRAPH_BASE, "oauth/access_token", {
-    client_id: getMetaAppId(),
-    client_secret: getMetaAppSecret(),
-    redirect_uri: getMetaRedirectUri(),
+    client_id: options.pagesOnly ? getMetaPagesAppId() : getMetaAppId(),
+    client_secret: options.pagesOnly ? getMetaPagesAppSecret() : getMetaAppSecret(),
+    redirect_uri: options.pagesOnly ? getMetaPagesRedirectUri() : getMetaRedirectUri(),
     code,
   });
   const data = await graphFetch<GraphOAuthTokenResponse>(url);
@@ -57,11 +64,14 @@ export async function exchangeCodeForToken(code: string): Promise<ExchangedToken
 
 /** Passo 2: troca o token de curta duração (~1-2h) por um de longa duração (~60 dias) — é
  *  esse que vira a base dos Page Access Tokens de longa duração usados pra publicar. */
-export async function exchangeForLongLivedToken(shortLivedToken: string): Promise<ExchangedToken> {
+export async function exchangeForLongLivedToken(
+  shortLivedToken: string,
+  options: { pagesOnly?: boolean } = {}
+): Promise<ExchangedToken> {
   const url = graphUrl(GRAPH_BASE, "oauth/access_token", {
     grant_type: "fb_exchange_token",
-    client_id: getMetaAppId(),
-    client_secret: getMetaAppSecret(),
+    client_id: options.pagesOnly ? getMetaPagesAppId() : getMetaAppId(),
+    client_secret: options.pagesOnly ? getMetaPagesAppSecret() : getMetaAppSecret(),
     fb_exchange_token: shortLivedToken,
   });
   const data = await graphFetch<GraphOAuthTokenResponse>(url);

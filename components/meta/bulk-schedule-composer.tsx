@@ -2,14 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarRange, HardDrive, Loader2, Minus, Plus, RotateCw, Sparkles, X } from "lucide-react";
-import { BEST_TIME_SLOTS, pickTimeSlots, planSchedule } from "@/lib/scheduling/plan";
+import { BEST_TIME_SLOTS, MAX_VIDEOS_PER_DAY, pickTimeSlots, planSchedule } from "@/lib/scheduling/plan";
 import type { PublicSocialAccount } from "@/lib/server/meta/types";
 import { CoverImagePicker } from "@/components/meta/cover-image-picker";
 
 type DriveFile = { id: string; name: string; createdTime: string | null };
 
 const TIME_SLOTS_STORAGE_KEY = "zenx:bulk-schedule-time-slots";
-const MAX_CUSTOM_SLOTS = 12;
+const MAX_CUSTOM_SLOTS = MAX_VIDEOS_PER_DAY;
 
 function formatDateTime(date: Date) {
   return new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(date);

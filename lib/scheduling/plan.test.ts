@@ -12,7 +12,7 @@ describe("pickTimeSlots", () => {
 
   it("spreads two slots across morning and evening instead of two consecutive ones", () => {
     const slots = pickTimeSlots(2);
-    expect(slots).toEqual(["08:00", "21:00"]);
+    expect(slots).toEqual(["08:00", "22:00"]);
   });
 
   it("clamps counts above the available slot list", () => {
@@ -31,11 +31,11 @@ describe("planSchedule", () => {
   });
 
   it("never schedules a time that has already passed today", () => {
-    // With 2 videos/day the slots are 08:00 and 21:00 — at 13:00, 21:00 is still ahead today.
+    // With 2 videos/day the slots are 08:00 and 22:00 — at 13:00, 22:00 is still ahead today.
     const from = new Date("2026-01-01T13:00:00");
     const schedule = planSchedule(2, 2, from);
     expect(schedule[0].getDate()).toBe(1);
-    expect(schedule[0].getHours()).toBe(21);
+    expect(schedule[0].getHours()).toBe(22);
     expect(schedule[1].getDate()).toBe(2);
   });
 

@@ -3,7 +3,11 @@
  *  onde a maioria dos estudos de melhor horário de postagem (Later, Hootsuite, Sprout Social)
  *  convergem para contas de entretenimento/lifestyle. Não é uma pesquisa ao vivo — é um padrão
  *  fixo, ajustável aqui se o usuário perceber horários melhores pro próprio público. */
-export const BEST_TIME_SLOTS = ["08:00", "11:00", "13:00", "15:00", "17:00", "19:00", "21:00"];
+export const BEST_TIME_SLOTS = [
+  "08:00", "09:00", "10:00", "11:00", "12:00",
+  "13:00", "14:00", "15:00", "16:00", "17:00",
+  "18:00", "19:00", "20:00", "21:00", "22:00",
+];
 
 export const MAX_VIDEOS_PER_DAY = BEST_TIME_SLOTS.length;
 

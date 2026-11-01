@@ -129,7 +129,7 @@ export function createZip(files: Array<{ filename: string; content: Buffer }>) {
   ]);
 }
 
-type ZipDiskFile = { filename: string; path: string };
+export type ZipDiskFile = { filename: string; path: string };
 
 async function* zipFileChunks(files: ZipDiskFile[]) {
   if (files.length > 0xffff) throw new Error("O ZIP não pode conter mais de 65.535 arquivos.");
@@ -227,4 +227,9 @@ async function* zipFileChunks(files: ZipDiskFile[]) {
 export async function writeZipArchive(files: ZipDiskFile[], outputPath: string) {
   await mkdir(path.dirname(outputPath), { recursive: true });
   await pipeline(Readable.from(zipFileChunks(files)), createWriteStream(outputPath));
+}
+
+/** Stream a ZIP archive directly from disk without making a second multi-gigabyte copy. */
+export function createZipStream(files: ZipDiskFile[]) {
+  return Readable.from(zipFileChunks(files));
 }

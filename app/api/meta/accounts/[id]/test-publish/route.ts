@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { publicationLogsRepo, socialAccountsRepo } from "@/lib/server/meta/db";
 import { INSTAGRAM_GRAPH_BASE } from "@/lib/server/meta/config";
-import { publishFacebookReel } from "@/lib/server/meta/facebook";
+import { publishFacebookPageVideo } from "@/lib/server/meta/facebook";
 import { MetaGraphError, MetaNetworkError } from "@/lib/server/meta/graph-client";
 import { publishInstagramReel } from "@/lib/server/meta/instagram";
 import { logMetaApiError, logMetaStep } from "@/lib/server/meta/log";
@@ -14,12 +14,11 @@ export const maxDuration = 300;
 
 type TestPublishBody = { videoUrl: string; caption?: string };
 
-/** Botão "Publicar Reel teste": publica IMEDIATAMENTE nesta única conta, sem passar pela fila
+/** Botão "Publicar teste": publica IMEDIATAMENTE nesta única conta, sem passar pela fila
  *  de agendamento (scheduled_posts/scheduled_post_accounts) — por instrução explícita, o
  *  scheduler só entra depois que "conectar → listar → validar → publicar manualmente"
- *  estiver comprovadamente funcionando. Recebe uma URL pública de um MP4, cria o
- *  container/upload, aguarda processamento quando aplicável, publica e devolve o ID da mídia
- *  publicada — o resultado (sucesso ou falha) é sempre salvo em publication_logs. */
+ *  estiver comprovadamente funcionando. Instagram continua usando Reels; Página do Facebook
+ *  publica como vídeo comum para aceitar clipes longos. O resultado é salvo em publication_logs. */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const body = (await request.json().catch(() => null)) as TestPublishBody | null;
@@ -66,12 +65,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       externalId = result.externalId;
     } else {
       if (!account.pageId) throw new Error("Conta Facebook sem page_id salvo — reconecte a conta.");
-      const result = await publishFacebookReel({
+      const result = await publishFacebookPageVideo({
         pageId: account.pageId,
         pageAccessToken: accessToken,
         videoUrl: body.videoUrl,
-        caption,
-        onEvent,
+        description: caption,
       });
       externalId = result.externalId;
     }

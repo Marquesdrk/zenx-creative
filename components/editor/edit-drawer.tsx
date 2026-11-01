@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDown, ChevronLeft, ChevronRight, RotateCcw, Volume2, VolumeX, X } from "lucide-react";
 import { clamp, contentTargetAspect } from "@/lib/editor/crop-geometry";
 import { analyzeVideoSource } from "@/lib/editor/source-analysis";
+import type { SharedOverrideKey } from "@/lib/editor/shared-overrides";
+import { extractVideoTitle } from "@/lib/editor/title-ocr";
 import { CropBoxEditor } from "./crop-box-editor";
 import { VideoFrame } from "./video-frame";
 import { WatermarkCanvas } from "./watermark-canvas";
@@ -11,6 +13,7 @@ import {
   ASPECT_MODE_LABELS,
   DEFAULT_REACT_OVERLAY,
   FULL_FRAME_CROP,
+  SOURCE_ANALYSIS_VERSION,
   resolveXStyleLayout,
   type AspectMode,
   type BatchItem,
@@ -48,6 +51,10 @@ function rgbToHex(r: number, g: number, b: number) {
   return `#${[r, g, b].map((value) => Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0")).join("")}`;
 }
 
+function sameCrop(a: Crop, b: Crop) {
+  return (Object.keys(a) as (keyof Crop)[]).every((key) => Math.abs(a[key] - b[key]) < 0.003);
+}
+
 function SectionLabel({ children }: { children: React.ReactNode }) {
   return <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{children}</p>;
 }
@@ -60,6 +67,9 @@ export function EditDrawer({
   positionLabel,
   onPrev,
   onNext,
+  onSmartCropBatch,
+  onApplyToBatch,
+  onDetectTitlesBatch,
 }: {
   item: BatchItem;
   profile: Profile;
@@ -70,12 +80,32 @@ export function EditDrawer({
   /** Ausente (undefined) quando não há vizinho nessa direção — some o botão. */
   onPrev?: () => void;
   onNext?: () => void;
+  /** Roda o recorte inteligente nos OUTROS vídeos do lote (o aberto é tratado aqui, no rascunho).
+   *  Devolve quantos vídeos foram atualizados. */
+  /** Copia campos do rascunho para os outros vídeos do lote na hora. Devolve quantos receberam. */
+  onApplyToBatch?: (
+    batchId: string,
+    sourceItemId: string,
+    source: BatchItem["manualOverrides"],
+    only: ReadonlyArray<SharedOverrideKey>
+  ) => number;
+  /** Lê o título dos OUTROS vídeos do lote e grava no campo Título de cada um. */
+  onDetectTitlesBatch?: (
+    batchId: string,
+    excludeItemId: string,
+    onProgress: (done: number, total: number) => void
+  ) => Promise<{ found: number; total: number }>;
+  onSmartCropBatch?: (
+    batchId: string,
+    excludeItemId: string,
+    onProgress: (done: number, total: number) => void
+  ) => Promise<number>;
 }) {
   const [draft, setDraft] = useState(item);
   const [applyToAll, setApplyToAll] = useState(false);
   const [duration, setDuration] = useState(0);
-  const [redetecting, setRedetecting] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const migrationAnalysisStarted = useRef(false);
   const trimVideoRef = useRef<HTMLVideoElement>(null);
   const overrides = draft.manualOverrides;
   const reactOverlay = { ...DEFAULT_REACT_OVERLAY, ...(overrides.reactOverlay ?? {}) };
@@ -115,6 +145,99 @@ export function EditDrawer({
     video.muted = overrides.muted;
   }, [overrides.volume, overrides.muted]);
 
+  // Lotes persistidos antes da análise atual guardam um crop antigo e não têm versão.
+  // Reanalisa ao abrir o item para que a atualização funcione sem reimportar o lote.
+  useEffect(() => {
+    // Vídeo ainda na fila do lote (ANALYZING) também entra: aberto no editor, passa na frente.
+    if (!item.contentUrl || ((item.sourceAnalysis?.analysisVersion ?? 0) >= SOURCE_ANALYSIS_VERSION && !item.sourceAnalysis?.incomplete)) return;
+    if (migrationAnalysisStarted.current) return;
+    migrationAnalysisStarted.current = true;
+    void analyzeVideoSource(item.contentUrl, { priority: true })
+      .then((analysis) => {
+        if (analysis.incomplete) return;
+        setDraft((current) => {
+          const previousCrop = current.sourceAnalysis?.suggestedCrop ?? FULL_FRAME_CROP;
+          const cropWasNotManuallyChanged =
+            current.sourceAnalysis
+              ? sameCrop(current.manualOverrides.crop, previousCrop)
+              : sameCrop(current.manualOverrides.crop, FULL_FRAME_CROP);
+          const oldTitleWasAutoDetected = Boolean(
+            current.sourceAnalysis?.suggestedTitle &&
+            current.manualOverrides.title === current.sourceAnalysis.suggestedTitle
+          );
+          return {
+            ...current,
+            sourceAnalysis: analysis,
+            manualOverrides: {
+              ...current.manualOverrides,
+              ...(cropWasNotManuallyChanged ? { crop: analysis.suggestedCrop } : {}),
+              ...(oldTitleWasAutoDetected && profile.engine === "X_STYLE"
+                ? { title: profile.defaultTitle ?? "Título do vídeo" }
+                : {}),
+            },
+          };
+        });
+      })
+      .catch(() => undefined);
+  }, [item, profile]);
+
+  const [detectingCrop, setDetectingCrop] = useState(false);
+  const [smartCropStatus, setSmartCropStatus] = useState<string | null>(null);
+  const [captionStatus, setCaptionStatus] = useState<string | null>(null);
+  const [detectingTitles, setDetectingTitles] = useState(false);
+  const [titleStatus, setTitleStatus] = useState<string | null>(null);
+
+  // Lê o título que o vídeo original já traz (texto acima do vídeo) neste e nos demais do lote.
+  async function handleDetectTitles() {
+    if (!draft.contentUrl) return;
+    setDetectingTitles(true);
+    setTitleStatus("Lendo o título deste vídeo…");
+    try {
+      let found = 0;
+      let total = 1;
+      const own = await extractVideoTitle(draft.contentUrl, draft.manualOverrides.crop, draft.manualOverrides.rotation).catch(() => null);
+      if (own) {
+        updateOverrides({ title: own });
+        found += 1;
+      }
+      if (onDetectTitlesBatch) {
+        const rest = await onDetectTitlesBatch(draft.batchId, draft.id, (done, count) =>
+          setTitleStatus(`Lendo os títulos do lote… ${done}/${count}`)
+        );
+        found += rest.found;
+        total += rest.total;
+      }
+      setTitleStatus(`Título encontrado em ${found} de ${total} vídeo(s). Revise e ajuste o que precisar.`);
+    } finally {
+      setDetectingTitles(false);
+    }
+  }
+
+  // Um clique analisa o vídeo aberto e todos os outros do lote — cada um com o próprio recorte.
+  async function handleSmartCrop() {
+    if (!draft.contentUrl) return;
+    setDetectingCrop(true);
+    setSmartCropStatus(null);
+    try {
+      const analysis = await analyzeVideoSource(draft.contentUrl);
+      setDraft((current) => ({
+        ...current,
+        sourceAnalysis: analysis,
+        manualOverrides: { ...current.manualOverrides, crop: analysis.suggestedCrop, zoom: 1 },
+      }));
+      if (onSmartCropBatch) {
+        const updated = await onSmartCropBatch(draft.batchId, draft.id, (done, total) =>
+          setSmartCropStatus(`Analisando os outros vídeos do lote… ${done}/${total}`)
+        );
+        setSmartCropStatus(
+          updated > 0 ? `Recorte inteligente aplicado a este vídeo e a mais ${updated} do lote.` : "Recorte inteligente aplicado."
+        );
+      }
+    } finally {
+      setDetectingCrop(false);
+    }
+  }
+
   function updateOverrides(patch: Partial<BatchItem["manualOverrides"]>) {
     setDraft((current) => ({
       ...current,
@@ -147,21 +270,6 @@ export function EditDrawer({
     next.x = Math.round(Math.min(OUTPUT_WIDTH - next.width, Math.max(0, next.x)));
     next.y = Math.round(Math.min(OUTPUT_HEIGHT - next.height, Math.max(0, next.y)));
     updateOverrides({ xStyleVideoFrame: next });
-  }
-
-  async function handleRedetect() {
-    if (!draft.contentUrl) return;
-    setRedetecting(true);
-    const analysis = await analyzeVideoSource(draft.contentUrl);
-    setDraft((current) => ({
-      ...current,
-      sourceAnalysis: analysis,
-      manualOverrides: {
-        ...current.manualOverrides,
-        crop: analysis.suggestedCrop,
-      },
-    }));
-    setRedetecting(false);
   }
 
   return (
@@ -299,18 +407,7 @@ export function EditDrawer({
               <div className="mx-auto flex w-full max-w-[280px] items-center justify-between gap-2">
                 <p className="text-[11px] text-muted">
                   {draft.sourceAnalysis.width}×{draft.sourceAnalysis.height}px
-                  {draft.sourceAnalysis.hasLetterboxing ? " · barras detectadas, recorte sugerido" : ""}
                 </p>
-                {draft.contentUrl && (
-                  <button
-                    type="button"
-                    onClick={handleRedetect}
-                    disabled={redetecting}
-                    className="shrink-0 text-[11px] font-semibold text-accent disabled:opacity-40"
-                  >
-                    {redetecting ? "Analisando…" : "Redetectar"}
-                  </button>
-                )}
               </div>
             )}
           </div>
@@ -442,6 +539,17 @@ export function EditDrawer({
                     onChange={(event) => updateOverrides({ title: event.target.value })}
                     className="w-full rounded-lg border border-border bg-card p-2 text-sm text-foreground"
                   />
+                  <div className="mt-2 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleDetectTitles}
+                      disabled={detectingTitles || !draft.contentUrl}
+                      className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-[#B8B0FF] hover:bg-accent/20 disabled:opacity-50"
+                    >
+                      {detectingTitles ? "Lendo títulos…" : onDetectTitlesBatch ? "Ler título do vídeo original (todos do lote)" : "Ler título do vídeo original"}
+                    </button>
+                    {titleStatus && <span className="text-[11px] text-muted">{titleStatus}</span>}
+                  </div>
                 </div>
               )}
 
@@ -612,7 +720,7 @@ export function EditDrawer({
               {profile.engine === "X_STYLE" && xStyleVideoFrame && defaultXStyleVideoFrame && (
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <SectionLabel>Dimensão do vídeo no template</SectionLabel>
+                    <SectionLabel>Tamanho e posição no template</SectionLabel>
                     <button
                       type="button"
                       onClick={() => updateOverrides({ xStyleVideoFrame: null })}
@@ -624,7 +732,6 @@ export function EditDrawer({
                   <div className="grid grid-cols-2 gap-3">
                     {([
                       ["x", "X", 0, 1080 - xStyleVideoFrame.width],
-                      ["y", "Y", 0, 1920 - xStyleVideoFrame.height],
                       ["width", "Largura", MIN_X_STYLE_FRAME_SIZE, OUTPUT_WIDTH],
                       ["height", "Altura", MIN_X_STYLE_FRAME_SIZE, OUTPUT_HEIGHT],
                     ] as const).map(([key, label, min, max]) => (
@@ -671,6 +778,23 @@ export function EditDrawer({
                     rows={profile.engine === "X_STYLE" ? 2 : 3}
                     className="w-full rounded-lg border border-border bg-card p-2 text-sm text-foreground"
                   />
+                  {onApplyToBatch && (
+                    <div className="mt-2 flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const count = onApplyToBatch(draft.batchId, draft.id, draft.manualOverrides, ["caption"]);
+                          setCaptionStatus(
+                            count > 0 ? `Texto aplicado a mais ${count} vídeo(s) do lote.` : "Este lote só tem este vídeo."
+                          );
+                        }}
+                        className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-[#B8B0FF] hover:bg-accent/20"
+                      >
+                        Aplicar este texto a todos os vídeos do lote
+                      </button>
+                      {captionStatus && <span className="text-[11px] text-muted">{captionStatus}</span>}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -680,7 +804,9 @@ export function EditDrawer({
                   <span className="text-[11px] tabular-nums text-gray-400">{overrides.zoom.toFixed(1)}×</span>
                 </div>
                 <p className="mb-2 -mt-1 text-[11px] text-muted">
-                  Arraste a moldura para reposicionar e use qualquer borda ou canto para ajustar.
+                  {draft.sourceAnalysis?.hasLetterboxing
+                    ? "Recorte inteligente aplicado: cabeçalho, legenda e faixas em volta foram removidos. Arraste a moldura ou ajuste as bordas se quiser refinar."
+                    : "Nenhum cabeçalho ou faixa detectado. Arraste a moldura ou ajuste as bordas para escolher o enquadramento."}
                 </p>
                 <CropBoxEditor
                   contentUrl={draft.contentUrl}
@@ -751,6 +877,46 @@ export function EditDrawer({
                   </div>
                 </div>
 
+                {profile.engine === "X_STYLE" && xStyleVideoFrame && defaultXStyleVideoFrame && (
+                  <div className="mt-3 rounded-lg border border-border bg-card p-3">
+                    <div className="mb-2 flex items-center justify-between gap-3">
+                      <label htmlFor="x-style-video-position" className="text-xs font-semibold text-foreground">
+                        Posição do vídeo no template
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <output htmlFor="x-style-video-position" className="text-[11px] tabular-nums text-muted">
+                          {Math.round((xStyleVideoFrame.y / Math.max(1, OUTPUT_HEIGHT - xStyleVideoFrame.height)) * 100)}%
+                        </output>
+                        <button
+                          type="button"
+                          onClick={() => updateXStyleVideoFrame({ y: defaultXStyleVideoFrame.y })}
+                          className="text-[11px] font-semibold text-accent hover:text-foreground"
+                        >
+                          Posição inicial
+                        </button>
+                      </div>
+                    </div>
+                    <input
+                      id="x-style-video-position"
+                      aria-label="Posição vertical do vídeo no template"
+                      type="range"
+                      min={0}
+                      max={Math.max(0, OUTPUT_HEIGHT - xStyleVideoFrame.height)}
+                      step={4}
+                      value={xStyleVideoFrame.y}
+                      onChange={(event) => updateXStyleVideoFrame({ y: Number(event.target.value) })}
+                      className="w-full accent-accent"
+                    />
+                    <div className="mt-1 flex justify-between text-[10px] text-muted">
+                      <span>Mais alto</span>
+                      <span>Mais baixo</span>
+                    </div>
+                    <p className="mt-2 text-[10px] text-muted">
+                      Move a moldura do vídeo sobre o template; o recorte acima ajusta o conteúdo dentro dela.
+                    </p>
+                  </div>
+                )}
+
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <label className="flex-1 text-[11px] text-muted">
                     Proporção:
@@ -767,15 +933,14 @@ export function EditDrawer({
                       ))}
                     </select>
                   </label>
-                  {draft.sourceAnalysis?.hasLetterboxing && (
-                    <button
-                      type="button"
-                      onClick={() => updateOverrides({ crop: draft.sourceAnalysis!.suggestedCrop })}
-                      className="shrink-0 text-[11px] font-semibold text-accent"
-                    >
-                      Usar detecção automática
-                    </button>
-                  )}
+                  <button
+                    type="button"
+                    onClick={handleSmartCrop}
+                    disabled={detectingCrop || !draft.contentUrl}
+                    className="shrink-0 rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-[#B8B0FF] hover:bg-accent/20 disabled:opacity-50"
+                  >
+                    {detectingCrop ? "Analisando…" : onSmartCropBatch ? "Recorte inteligente em todos" : "Recorte inteligente"}
+                  </button>
                   <button
                     type="button"
                     onClick={() => updateOverrides({ crop: { ...FULL_FRAME_CROP }, zoom: 1 })}
@@ -784,6 +949,10 @@ export function EditDrawer({
                     Redefinir
                   </button>
                 </div>
+
+                {smartCropStatus && (
+                  <p className="mt-2 rounded-lg border border-accent/20 bg-accent/5 px-2.5 py-2 text-[11px] text-gray-300">{smartCropStatus}</p>
+                )}
 
                 {overrides.aspectMode === "free" && (
                   <p className="mt-2 rounded-lg border border-accent/20 bg-accent/5 px-2.5 py-2 text-[11px] text-gray-300">

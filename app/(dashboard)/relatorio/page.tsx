@@ -162,6 +162,13 @@ export default function RelatorioPage() {
             <SummaryCard icon={Clock3} label="Agendamentos vencidos" value={totals.overdue.toLocaleString("pt-BR")} tone={totals.overdue > 0 ? "amber" : "default"} />
           </div>
 
+          {report.mergedDuplicateProfiles?.length > 0 && (
+            <div className="mb-5 rounded-lg border border-accent/30 bg-accent/10 p-3 text-sm text-[#CFC9FF]">
+              Perfil cadastrado em duplicidade: {report.mergedDuplicateProfiles.join(", ")}. O relatório juntou as cópias numa
+              linha só; remova a cópia sobrando em <a href="/configuracoes" className="font-semibold underline">Configurações</a>.
+            </div>
+          )}
+
           {report.unmatchedScheduledVideos > 0 && (
             <div className="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-100">
               {report.unmatchedScheduledVideos} vídeo(s) agendado(s) estão em contas sem um perfil correspondente

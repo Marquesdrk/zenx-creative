@@ -37,6 +37,27 @@ function throwIfError<T>(
   return data;
 }
 
+/** O PostgREST do Supabase devolve no máximo 1000 linhas por consulta, sem avisar. Listagens
+ *  completas (relatório, calendário, fila) precisam buscar em páginas — senão tudo que passa de
+ *  1000 linhas some (foi o que escondia os agendamentos de perfis inteiros no relatório). */
+const SUPABASE_PAGE_SIZE = 1000;
+
+async function fetchAllPages<T>(
+  fetchPage: (
+    from: number,
+    to: number
+  ) => PromiseLike<{ data: T[] | null; error: { message: string; details?: string | null; hint?: string | null; code?: string | null } | null }>
+): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += SUPABASE_PAGE_SIZE) {
+    const { data, error } = await fetchPage(from, from + SUPABASE_PAGE_SIZE - 1);
+    const page = throwIfError(data ?? [], error);
+    rows.push(...page);
+    if (page.length < SUPABASE_PAGE_SIZE) break;
+  }
+  return rows;
+}
+
 // --- social_accounts -----------------------------------------------------------------------
 
 type SocialAccountRow = {
@@ -262,11 +283,15 @@ function scheduledPostFromRow(row: ScheduledPostRow): ScheduledPost {
 
 export const scheduledPostsRepo = {
   async list(): Promise<ScheduledPost[]> {
-    const { data, error } = await getSupabaseAdmin()
-      .from("scheduled_posts")
-      .select("*")
-      .order("created_at", { ascending: false });
-    return throwIfError(data ?? [], error).map((row) => scheduledPostFromRow(row as ScheduledPostRow));
+    const rows = await fetchAllPages((from, to) =>
+      getSupabaseAdmin()
+        .from("scheduled_posts")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, to)
+    );
+    return rows.map((row) => scheduledPostFromRow(row as ScheduledPostRow));
   },
 
   async get(id: string): Promise<ScheduledPost | null> {
@@ -369,11 +394,15 @@ function scheduledPostAccountFromRow(row: ScheduledPostAccountRow): ScheduledPos
 
 export const scheduledPostAccountsRepo = {
   async listAll(): Promise<ScheduledPostAccount[]> {
-    const { data, error } = await getSupabaseAdmin()
-      .from("scheduled_post_accounts")
-      .select("*")
-      .order("created_at", { ascending: true });
-    return throwIfError(data ?? [], error).map((row) => scheduledPostAccountFromRow(row as ScheduledPostAccountRow));
+    const rows = await fetchAllPages((from, to) =>
+      getSupabaseAdmin()
+        .from("scheduled_post_accounts")
+        .select("*")
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, to)
+    );
+    return rows.map((row) => scheduledPostAccountFromRow(row as ScheduledPostAccountRow));
   },
 
   async listByPost(scheduledPostId: string): Promise<ScheduledPostAccount[]> {
@@ -425,6 +454,22 @@ export const scheduledPostAccountsRepo = {
       .update({ status: "processing", updated_at: now })
       .eq("id", id)
       .eq("status", "scheduled")
+      .select("id");
+    throwIfError(data, error);
+    return (data?.length ?? 0) === 1;
+  },
+
+  /** Recupera um destino que ficou em processing após a execução ser interrompida. Só pode
+   *  reivindicar uma linha antiga, sem external_post_id; atualizar updated_at torna a operação
+   *  atômica contra outros workers que tentem recuperar o mesmo destino. */
+  async claimStaleProcessing(id: string, staleBeforeIso: string): Promise<boolean> {
+    const { data, error } = await getSupabaseAdmin()
+      .from("scheduled_post_accounts")
+      .update({ updated_at: new Date().toISOString() })
+      .eq("id", id)
+      .eq("status", "processing")
+      .is("external_post_id", null)
+      .lt("updated_at", staleBeforeIso)
       .select("id");
     throwIfError(data, error);
     return (data?.length ?? 0) === 1;

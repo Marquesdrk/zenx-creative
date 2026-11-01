@@ -49,7 +49,10 @@ API)":
 | `META_REDIRECT_URI` | Sim | URL de callback do OAuth — precisa bater exatamente com o que está cadastrado no app da Meta. Em produção precisa ser HTTPS público. |
 | `META_TOKEN_ENCRYPTION_KEY` | Sim | Chave AES-256-GCM (`openssl rand -base64 32`) usada para criptografar cada token de conta antes de gravar no Supabase. Trocar essa chave invalida todos os tokens salvos. |
 | `META_GRAPH_API_VERSION` | Não (default `v26.0`) | Versão fixa da Graph API usada em todas as chamadas — ver `lib/server/meta/config.ts`. |
-| `META_LOGIN_CONFIG_ID` | Recomendado no fluxo atual | ID da configuração criada em **Facebook Login for Business → Configurações**. Define as permissões do login e substitui `scope` manual quando preenchido. |
+| `META_LOGIN_CONFIG_ID` | Opcional | ID da configuração geral de **Facebook Login for Business**. Define as permissões do login geral e substitui `scope` manual quando preenchido. |
+| `META_PAGES_LOGIN_CONFIG_ID` | Opcional | Configuração de Login para Empresas restrita ao botão **Conectar Facebook**. Mantém o OAuth do Instagram separado. |
+| `META_PAGES_APP_ID` / `META_PAGES_APP_SECRET` / `META_PAGES_LOGIN_CONFIG_ID` | Recomendado para Páginas isoladas | Credenciais de um app Meta separado, com apenas o caso de uso de Páginas. Não alteram o app nem as permissões do Instagram. |
+| `META_PAGES_REDIRECT_URI` | Obrigatório para Páginas isoladas | Callback HTTPS do app exclusivo de Páginas (`/api/meta/pages/callback`); registre-o nas URLs OAuth válidas desse app. |
 | `PUBLIC_BASE_URL` | Sim, para publicar | URL pública HTTPS onde o app roda — a Meta baixa o vídeo renderizado a partir daqui. Já era usada pelos adapters antigos de Instagram/Facebook/TikTok. |
 | `META_OAUTH_SCOPE_MODE` | Não (default: modo básico) | `publish` pede o conjunto completo de permissões (Páginas + Instagram + publicação, seção 11). Deixe sem definir (ou qualquer outro valor) para pedir só `public_profile` — útil pra validar o OAuth num app recém-criado, antes da Meta liberar Páginas/Instagram para ele. Ver "Estratégia de dois estágios" logo abaixo. |
 | `META_OAUTH_SCOPES` | Não | Lista de escopos separada por vírgula, para sobrepor manualmente tanto o modo básico quanto o `publish` (ex.: testar um subconjunto específico de permissões). Se definida, tem prioridade sobre `META_OAUTH_SCOPE_MODE`. |

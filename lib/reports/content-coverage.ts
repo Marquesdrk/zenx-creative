@@ -26,6 +26,9 @@ export type ContentCoverageReport = {
   profiles: ContentCoverageRow[];
   unmatchedScheduledVideos: number;
   unmatchedAccounts: string[];
+  /** Nomes de perfis cadastrados em duplicidade (mesmo @ ou mesmo nome/engine) que o relatório
+   *  juntou numa linha só — a cópia sobrando deve ser removida em Configurações. */
+  mergedDuplicateProfiles: string[];
 };
 
 type ContentCoverageInput = {
@@ -75,21 +78,53 @@ function accountLabel(account: PublicSocialAccount) {
   return account.username ? `@${account.username.replace(/^@/, "")}` : account.accountName;
 }
 
+/** Junta perfis cadastrados em duplicidade (mesmo @, ou mesmo nome na mesma engine). O perfil
+ *  "principal" de cada grupo é o que tem foto (senão o primeiro). Sem isso, as duas cópias
+ *  disputam a mesma conta social e nenhuma recebe os vídeos. */
+function dedupeProfiles(profiles: Profile[]) {
+  const canonicalById = new Map<string, Profile>();
+  const groups: Profile[][] = [];
+  const groupByKey = new Map<string, Profile[]>();
+  for (const profile of profiles) {
+    const handleKey = normalizedKey("handle" in profile ? profile.handle : null);
+    const nameKey = `${profile.engine}:${normalizedKey(profile.name)}`;
+    const keys = [handleKey ? `handle:${handleKey}` : null, `name:${nameKey}`].filter((key): key is string => Boolean(key));
+    let group = keys.map((key) => groupByKey.get(key)).find(Boolean);
+    if (!group) {
+      group = [];
+      groups.push(group);
+    }
+    group.push(profile);
+    for (const key of keys) groupByKey.set(key, group);
+  }
+  const merged: string[] = [];
+  const unique: Profile[] = [];
+  for (const group of groups) {
+    const primary =
+      group.find((profile) => profile.profilePictureUrl || ("avatarUrl" in profile && profile.avatarUrl)) ?? group[0];
+    unique.push(primary);
+    for (const profile of group) canonicalById.set(profile.id, primary);
+    if (group.length > 1) merged.push(primary.name);
+  }
+  return { unique, canonicalById, merged };
+}
+
 export function buildContentCoverageReport(input: ContentCoverageInput): ContentCoverageReport {
   const now = input.now ?? new Date();
-  const profilesById = new Map(input.profiles.map((profile) => [profile.id, profile]));
+  const { unique: uniqueProfiles, canonicalById, merged: mergedDuplicateProfiles } = dedupeProfiles(input.profiles);
+  const profilesById = new Map(input.profiles.map((profile) => [profile.id, canonicalById.get(profile.id) ?? profile]));
   const rows = new Map<string, {
     profile: Profile;
     published: Set<string>;
     videos: Map<string, Set<number>>;
     accounts: Map<string, ContentCoverageRow["accounts"][number]>;
   }>();
-  for (const profile of input.profiles) {
+  for (const profile of uniqueProfiles) {
     rows.set(profile.id, { profile, published: new Set(), videos: new Map(), accounts: new Map() });
   }
 
   const profileIdsByKey = new Map<string, string[]>();
-  for (const profile of input.profiles) {
+  for (const profile of uniqueProfiles) {
     const keys = new Set([normalizedKey(profile.name), normalizedKey("handle" in profile ? profile.handle : null)]);
     for (const key of keys) {
       if (!key) continue;
@@ -132,11 +167,12 @@ export function buildContentCoverageReport(input: ContentCoverageInput): Content
   for (const publication of input.publications) {
     const item = itemsById.get(publication.batchItemId);
     const batch = item ? batchesById.get(item.batchId) : undefined;
-    if (!item || !batch || !profilesById.has(batch.profileId)) continue;
+    const canonicalProfile = batch ? profilesById.get(batch.profileId) : undefined;
+    if (!item || !batch || !canonicalProfile) continue;
     if (publication.status === "PUBLISHED") {
-      rows.get(batch.profileId)?.published.add(`batch-item:${item.id}`);
+      rows.get(canonicalProfile.id)?.published.add(`batch-item:${item.id}`);
     } else if (publication.status === "PENDING" && publication.scheduledAt) {
-      addVideo(batch.profileId, `batch-item:${item.id}`, publication.scheduledAt);
+      addVideo(canonicalProfile.id, `batch-item:${item.id}`, publication.scheduledAt);
     }
   }
 
@@ -209,5 +245,6 @@ export function buildContentCoverageReport(input: ContentCoverageInput): Content
     profiles,
     unmatchedScheduledVideos: unmatchedPosts.size,
     unmatchedAccounts: [...unmatchedAccounts].sort((a, b) => a.localeCompare(b, "pt-BR")),
+    mergedDuplicateProfiles,
   };
 }

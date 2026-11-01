@@ -51,10 +51,38 @@ export function getMetaLoginConfigId(): string | null {
   return process.env.META_LOGIN_CONFIG_ID?.trim() || null;
 }
 
+/** Login configuration restrita à conexão de Páginas do Facebook. Mantê-la separada
+ *  impede que as permissões de Páginas alterem o fluxo de conexão do Instagram. */
+export function getMetaPagesLoginConfigId(): string | null {
+  return process.env.META_PAGES_LOGIN_CONFIG_ID?.trim() || null;
+}
+
+/** App da Meta independente, usado exclusivamente para login e publicação em Páginas. */
+export function getMetaPagesAppId(): string {
+  return required("META_PAGES_APP_ID");
+}
+
+export function getMetaPagesAppSecret(): string {
+  return required("META_PAGES_APP_SECRET");
+}
+
+export function getMetaPagesRedirectUri(): string {
+  return required("META_PAGES_REDIRECT_URI");
+}
+
+export function isMetaPagesConfigured(): boolean {
+  return Boolean(
+    process.env.META_PAGES_APP_ID?.trim() &&
+      process.env.META_PAGES_APP_SECRET?.trim() &&
+      process.env.META_PAGES_REDIRECT_URI?.trim() &&
+      getMetaPagesLoginConfigId()
+  );
+}
+
 export function canDiscoverMetaAssets(): boolean {
   // Login Configurations define the granted permissions inside Meta and therefore
   // do not expose them through the legacy `scope` environment variable.
-  if (getMetaLoginConfigId()) return true;
+  if (getMetaLoginConfigId() || getMetaPagesLoginConfigId()) return true;
   const scopes = getMetaOAuthScopes();
   return scopes.includes("pages_show_list") && scopes.includes("pages_read_engagement");
 }

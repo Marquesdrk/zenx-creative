@@ -1,18 +1,21 @@
 import { NextResponse } from "next/server";
 import { del, get } from "@vercel/blob";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { BatchItem, Profile } from "@/lib/editor/types";
 import { renderBatchItem } from "@/lib/server/render";
 import { deletePublicUrl, generatedFileUrl, generatedFolder, publicUrlToPath } from "@/lib/server/public-files";
-import { createZip, writeZipArchive, zipArchiveFilename, zipVideoFilename } from "@/lib/server/zip";
+import { createZip, zipArchiveFilename, zipVideoFilename } from "@/lib/server/zip";
 import { socialAccountsRepo } from "@/lib/server/meta/db";
 import { uploadScheduledVideoToDrive } from "@/lib/server/google-drive";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 const MAX_PARALLEL_RENDERS = 1;
+// ZIP32 cannot address files or archives >= 4 GiB. Leave headroom for ZIP headers and
+// central-directory entries, and split large batches into downloadable archives.
+const MAX_ZIP_PART_BYTES = 3.5 * 1024 ** 3;
 
 function temporaryVideoFilename(originalFilename: string) {
   const extension = path.extname(originalFilename).toLowerCase();
@@ -204,30 +207,58 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "O lote não contém uma quantidade válida de vídeos." }, { status: 400 });
       }
 
-      const files = payload.items.map((item, index) => {
+      const files = await Promise.all(payload.items.map(async (item, index) => {
         if (!/^[a-zA-Z0-9_-]+$/.test(item.id)) throw new Error("Identificador de vídeo inválido.");
+        const filePath = path.join(generatedFolder("renders"), `${item.id}.mp4`);
+        const fileSize = (await stat(filePath)).size;
+        if (fileSize > MAX_ZIP_PART_BYTES) {
+          throw new Error(`"${item.filename}" sozinho ultrapassa o tamanho seguro de um ZIP. Exporte esse vídeo separadamente.`);
+        }
         return {
           filename: zipVideoFilename(`${String(index + 1).padStart(2, "0")}-${item.filename}`),
-          path: path.join(generatedFolder("renders"), `${item.id}.mp4`),
+          path: filePath,
+          id: item.id,
+          size: fileSize,
         };
-      });
-      const token = randomUUID();
-      const archiveFilename = `${token}-${zipArchiveFilename(`lote-${payload.batchId}`)}`;
-      const downloadFilename = zipArchiveFilename(`lote-${payload.batchId}`);
-      const archivePath = path.join(generatedFolder("renders"), archiveFilename);
-      const manifestPath = path.join(generatedFolder("batch-space"), `${token}.json`);
-      try {
-        await writeZipArchive(files, archivePath);
-        await mkdir(path.dirname(manifestPath), { recursive: true });
-        await writeFile(manifestPath, JSON.stringify({ archiveFilename, filename: downloadFilename, renderedIds: payload.items.map((item) => item.id) }));
-      } catch (error) {
-        await rm(archivePath, { force: true });
-        throw error;
+      }));
+      const parts: typeof files[] = [];
+      let currentPart: typeof files = [];
+      let currentBytes = 0;
+      for (const file of files) {
+        const estimatedBytes = file.size + Buffer.byteLength(file.filename, "utf8") + 256;
+        if (currentPart.length > 0 && currentBytes + estimatedBytes > MAX_ZIP_PART_BYTES) {
+          parts.push(currentPart);
+          currentPart = [];
+          currentBytes = 0;
+        }
+        currentPart.push(file);
+        currentBytes += estimatedBytes;
+      }
+      if (currentPart.length > 0) parts.push(currentPart);
+
+      const downloads: Array<{ downloadUrl: string; filename: string }> = [];
+      await mkdir(generatedFolder("batch-space"), { recursive: true });
+      for (const [partIndex, part] of parts.entries()) {
+        const token = randomUUID();
+        const downloadFilename = zipArchiveFilename(
+          parts.length > 1
+            ? `lote-${payload.batchId}-parte-${partIndex + 1}-de-${parts.length}`
+            : `lote-${payload.batchId}`
+        );
+        const manifestPath = path.join(generatedFolder("batch-space"), `${token}.json`);
+        await writeFile(
+          manifestPath,
+          JSON.stringify({
+            filename: downloadFilename,
+            files: part.map((file) => ({ id: file.id, filename: file.filename })),
+            renderedIds: part.map((file) => file.id),
+          })
+        );
+        downloads.push({ downloadUrl: `/api/batches/export-local/${token}/download`, filename: downloadFilename });
       }
 
       return NextResponse.json({
-        downloadUrl: `/api/batches/export-local/${token}/download`,
-        filename: downloadFilename,
+        downloads,
       });
     }
 

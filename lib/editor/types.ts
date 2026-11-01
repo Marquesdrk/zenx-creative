@@ -103,9 +103,8 @@ export type XStyleProfile = {
   defaultTitle?: string;
   /** Layout relativo ao canvas 1080x1920 do template pronto. */
   xStyleLayout?: XStyleLayout;
-  /** Cor do título e do texto abaixo do vídeo — depende do fundo do template importado
-   *  (backgroundImageUrl). Ausente = "black" (comportamento histórico). */
-  textColor?: "white" | "black";
+  /** Aparência do título e do texto abaixo do vídeo. Ausente = preto (comportamento histórico). */
+  textColor?: "white" | "black" | "none";
 };
 
 export type UgcProfile = {
@@ -264,14 +263,24 @@ export function createDefaultManualOverrides(
  *  disso. Guardado separado de `manualOverrides.crop`, que é o que o usuário efetivamente
  *  aplicou (começa igual ao sugerido, mas o usuário pode ajustar visualmente). */
 export type SourceAnalysis = {
+  /** Versão usada para migrar recortes automáticos antigos de volta ao quadro inteiro. */
+  analysisVersion?: number;
   width: number;
   height: number;
   aspectRatio: number;
+  /** Verdadeiro quando a detecção achou cabeçalho/barras em volta do conteúdo real. */
   hasLetterboxing: boolean;
-  /** Recorte sugerido a partir das mesmas barras detectadas — exclui exatamente as faixas
-   *  pretas, sem forçar proporção nem perder conteúdo real. */
+  /** Recorte inteligente do conteúdo real (quadro inteiro quando nada foi detectado). */
   suggestedCrop: Crop;
+  /** Texto de OCR legado, usado apenas para desfazer títulos que foram preenchidos automaticamente. */
+  suggestedTitle?: string | null;
+  /** Verdadeiro quando a leitura do vídeo falhou ou ficou pela metade (poucos quadros): o recorte
+   *  sugerido não é confiável e o item entra na lista de "reanalisar". */
+  incomplete?: boolean;
 };
+
+/** Atualize para migrar recortes automáticos antigos ao quadro inteiro, sem tocar ajustes manuais. */
+export const SOURCE_ANALYSIS_VERSION = 10;
 
 export type BatchItem = {
   id: string;

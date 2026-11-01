@@ -447,32 +447,36 @@ export function VideoFrame({
               height: `${(xStyleVideo.height / 1920) * 100}%`,
             }}
           />
-          <p
-            className={`absolute line-clamp-2 whitespace-pre-line text-left font-semibold leading-tight [overflow-wrap:anywhere] ${
-              profile.textColor === "white" ? "text-white" : "text-black"
-            }`}
-            style={{
-              left: `${(xStyleLayout.title.x / 1080) * 100}%`,
-              top: `${(xStyleLayout.title.y / 1920) * 100}%`,
-              width: `${(xStyleLayout.title.maxWidth / 1080) * 100}%`,
-              fontSize: `${(xStyleLayout.title.fontSize / 1080) * 100}cqw`,
-            }}
-          >
-            <EmojiText text={title || profile.defaultTitle || "Titulo do video"} />
-          </p>
-          <p
-            className={`absolute line-clamp-2 whitespace-pre-line text-center font-bold leading-tight ${
-              profile.textColor === "white" ? "text-white" : "text-neutral-950"
-            }`}
-            style={{
-              left: `${(xStyleLayout.body.x / 1080) * 100}%`,
-              top: `${(xStyleLayout.body.y / 1920) * 100}%`,
-              width: `${(xStyleLayout.body.maxWidth / 1080) * 100}%`,
-              fontSize: `${(xStyleLayout.body.fontSize / 1080) * 100}cqw`,
-            }}
-          >
-            <EmojiText text={caption} />
-          </p>
+          {profile.textColor === "none" ? null : (
+            <>
+              <p
+                className={`absolute line-clamp-2 whitespace-pre-line text-left font-semibold leading-tight [overflow-wrap:anywhere] ${
+                  profile.textColor === "white" ? "text-white" : "text-black"
+                }`}
+                style={{
+                  left: `${(xStyleLayout.title.x / 1080) * 100}%`,
+                  top: `${(xStyleLayout.title.y / 1920) * 100}%`,
+                  width: `${(xStyleLayout.title.maxWidth / 1080) * 100}%`,
+                  fontSize: `${(xStyleLayout.title.fontSize / 1080) * 100}cqw`,
+                }}
+              >
+                <EmojiText text={title || profile.defaultTitle || "Titulo do video"} />
+              </p>
+              <p
+                className={`absolute line-clamp-2 whitespace-pre-line text-center font-bold leading-tight ${
+                  profile.textColor === "white" ? "text-white" : "text-neutral-950"
+                }`}
+                style={{
+                  left: `${(xStyleLayout.body.x / 1080) * 100}%`,
+                  top: `${(xStyleLayout.body.y / 1920) * 100}%`,
+                  width: `${(xStyleLayout.body.maxWidth / 1080) * 100}%`,
+                  fontSize: `${(xStyleLayout.body.fontSize / 1080) * 100}cqw`,
+                }}
+              >
+                <EmojiText text={caption} />
+              </p>
+            </>
+          )}
         </div>
       )}
 
