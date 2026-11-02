@@ -16,7 +16,8 @@ const SHARED_KEYS = [
   "reactOverlay",
 ] as const satisfies ReadonlyArray<keyof ManualOverrides>;
 
-export type SharedOverrideKey = (typeof SHARED_KEYS)[number];
+/** "title" só é copiado quando pedido explicitamente (cada vídeo costuma ter o seu). */
+export type SharedOverrideKey = (typeof SHARED_KEYS)[number] | "title";
 
 /** Copia os ajustes compartilhados de `source` para `target`, preservando o que é de cada vídeo.
  *  `only` limita a cópia a alguns campos (ex.: só o texto abaixo do vídeo). */
@@ -25,7 +26,7 @@ export function applySharedOverrides(
   source: ManualOverrides,
   only?: ReadonlyArray<SharedOverrideKey>
 ): ManualOverrides {
-  const keys = only ?? SHARED_KEYS;
+  const keys: ReadonlyArray<SharedOverrideKey> = only ?? SHARED_KEYS;
   const next: ManualOverrides = { ...target };
   for (const key of keys) {
     (next as Record<string, unknown>)[key] = source[key];

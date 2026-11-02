@@ -277,10 +277,12 @@ export type SourceAnalysis = {
   /** Verdadeiro quando a leitura do vídeo falhou ou ficou pela metade (poucos quadros): o recorte
    *  sugerido não é confiável e o item entra na lista de "reanalisar". */
   incomplete?: boolean;
+  /** Como o recorte sugerido foi achado (usado para o padrão do lote). */
+  detectionMethod?: "motion" | "borders" | "seams" | "none";
 };
 
 /** Atualize para migrar recortes automáticos antigos ao quadro inteiro, sem tocar ajustes manuais. */
-export const SOURCE_ANALYSIS_VERSION = 10;
+export const SOURCE_ANALYSIS_VERSION = 12;
 
 export type BatchItem = {
   id: string;

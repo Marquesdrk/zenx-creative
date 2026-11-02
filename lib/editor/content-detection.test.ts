@@ -97,6 +97,42 @@ describe("detectContentRect", () => {
     expect((crop.y + crop.height) * H).toBeLessThanOrEqual(108.5);
   });
 
+  it("não inclui a legenda que muda a cada trecho, colada acima da foto", () => {
+    const rect = { x0: 0, x1: 90, y0: 78, y1: 130 };
+    const frames = [0, 1, 2, 3, 4].map((seed) => {
+      const f = frame(255, rect, seed);
+      // duas linhas de texto (fundo branco, ~15% de letras) que mudam a cada quadro
+      for (const y of [66, 67, 68, 69, 72, 73, 74, 75]) {
+        for (let x = 4; x < 86; x += 1) if ((x * 5 + y + seed * 11) % 7 < 1) f[y * W + x] = 10;
+      }
+      return f;
+    });
+    const { crop } = detectContentRect(frames, W, H);
+    expect(crop.y * H).toBeGreaterThanOrEqual(77.5);
+    expect((crop.y + crop.height) * H).toBeLessThanOrEqual(130.5);
+  });
+
+  it("recorta o miolo nítido de um repost com fundo desfocado (emendas simétricas)", () => {
+    const top = 40;
+    const bottom = H - 40;
+    const frames = [0, 1, 2, 3, 4].map((seed) => {
+      const f = new Uint8Array(W * H);
+      for (let y = 0; y < H; y += 1) {
+        for (let x = 0; x < W; x += 1) {
+          const sharp = y >= top && y < bottom;
+          // miolo: textura nítida; faixas: gradiente suave que também se mexe com o tempo
+          f[y * W + x] = sharp ? 40 + ((x * 7 + seed * 97) % 180) : 120 + ((seed * 9 + y) % 20);
+        }
+      }
+      return f;
+    });
+    const { crop, method } = detectContentRect(frames, W, H);
+    expect(method).toBe("seams");
+    expect(Math.abs(crop.y * H - top)).toBeLessThanOrEqual(1);
+    expect(Math.abs((crop.y + crop.height) * H - bottom)).toBeLessThanOrEqual(1);
+    expect(crop.width).toBe(1);
+  });
+
   it("não quebra com entrada inválida", () => {
     expect(detectContentRect([], W, H).method).toBe("none");
     expect(detectContentRect([new Uint8Array(4)], 2, 2).method).toBe("none");

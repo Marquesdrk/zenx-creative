@@ -19,10 +19,10 @@ const SUSPICIOUS_HEIGHT_RATIO = 0.4;
 /** Vídeo em tela cheia (quase tudo se mexe) não precisa da 2ª leitura; muita área parada, sim. */
 const STATIC_AREA_NEEDS_SECOND_LOOK = 0.5;
 const ANALYSIS_MAX_SIDE = 640;
-const SEEK_TIMEOUT_MS = 10000;
+const SEEK_TIMEOUT_MS = 6000;
 /** Depois desse orçamento, usa os quadros que já conseguiu em vez de desistir. */
-const SAMPLING_BUDGET_MS = 40000;
-const HARD_TIMEOUT_MS = SAMPLING_BUDGET_MS + 15000;
+const SAMPLING_BUDGET_MS = 20000;
+const HARD_TIMEOUT_MS = SAMPLING_BUDGET_MS + 10000;
 /** Decodificar vários vídeos grandes ao mesmo tempo deixa todos lentos demais — a fila garante
  *  que, mesmo com um lote de 200 vídeos, só poucos são analisados juntos (conforme o PC). */
 function maxConcurrentAnalyses() {
@@ -183,6 +183,7 @@ function analyzeNow(url: string, attempt: number): Promise<SourceAnalysis> {
               hasLetterboxing: detection.method !== "none",
               suggestedCrop: detection.crop,
               incomplete: sampled.frames.length < MIN_FRAMES_FOR_COMPLETE,
+              detectionMethod: detection.method,
             });
           })
           .catch(() => finish(dimensionsOnly(width, height)));

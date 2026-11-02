@@ -8,7 +8,7 @@ import type { Crop } from "./types";
  *  Pura e sem DOM, para ser testável isoladamente. A extração dos quadros fica em
  *  lib/editor/source-analysis.ts. */
 
-export type DetectionMethod = "motion" | "borders" | "none";
+export type DetectionMethod = "motion" | "borders" | "seams" | "none";
 
 export type ContentDetection = {
   crop: Crop;
@@ -31,6 +31,8 @@ const EDGE_TRIM_MAX_RATIO = 0.05; // quanto cada lado pode encolher ao tirar fio
 const EDGE_BG_TOLERANCE = 14;
 const EDGE_BG_FRACTION = 0.88;
 const SNAP_RATIO = 0.03;
+const TEXT_ROW_BG_FRACTION = 0.72; // linha de legenda: quase tudo fundo, com poucos pixels de letra
+const TEXT_TRIM_MAX_RATIO = 0.35; // quanto da caixa pode ser legenda no topo/base
 
 type Span = { start: number; end: number; weight: number };
 
@@ -199,6 +201,28 @@ function trimBackgroundEdges(box: Box, mean: Float32Array, width: number, height
   return { left, right, top, bottom };
 }
 
+/** Legenda que troca a cada trecho (texto sobre o fundo do repost) conta como movimento e acaba
+ *  dentro da caixa. Linhas coladas no topo/base em que quase tudo é fundo, em TODOS os quadros,
+ *  são texto — o vídeo de verdade tem imagem em praticamente toda linha. */
+function trimTextBands(box: Box, frames: Uint8Array[], width: number, bg: number): Box {
+  const isBg = (v: number) => Math.abs(v - bg) <= EDGE_BG_TOLERANCE;
+  const rowIsText = (y: number) => {
+    for (const frame of frames) {
+      let hits = 0;
+      for (let x = box.left; x < box.right; x += 1) if (isBg(frame[y * width + x])) hits += 1;
+      if (hits / (box.right - box.left) < TEXT_ROW_BG_FRACTION) return false;
+    }
+    return true;
+  };
+  const maxTrim = Math.floor((box.bottom - box.top) * TEXT_TRIM_MAX_RATIO);
+  let { top, bottom } = box;
+  const limitTop = box.top + maxTrim;
+  const limitBottom = box.bottom - maxTrim;
+  while (top < limitTop && rowIsText(top)) top += 1;
+  while (bottom > limitBottom && bottom > top + 8 && rowIsText(bottom - 1)) bottom -= 1;
+  return { ...box, top, bottom };
+}
+
 function finalize(box: { left: number; right: number; top: number; bottom: number }, width: number, height: number): Crop {
   const padX = width * PAD_RATIO;
   const padY = height * PAD_RATIO;
@@ -236,11 +260,102 @@ export function staticPixelRatio(frames: Uint8Array[]): number {
 
 const FULL: Crop = { x: 0, y: 0, width: 1, height: 1 };
 
+const SEAM_WINDOW_TOP: [number, number] = [0.12, 0.38]; // onde a emenda superior pode estar
+const SEAM_MIN_STRONG = 6; // pico da emenda mais forte (relativo às linhas vizinhas)
+const SEAM_MIN_WEAK = 1.5; // a outra emenda pode ser mais fraca (cena escura/lisa)
+const SEAM_SYMMETRY_ROWS = 0.015; // emendas simétricas: topo ≈ 1 - base
+const SEAM_MIN_SHARPNESS_GAIN = 1.25; // miolo precisa ser mais nítido que as faixas
+const SEAM_MIN_BAND_CHANGE = 1; // (ou, no mínimo, textura nas faixas)
+const SEAM_MIN_BAND_TEXTURE = 0.3; // faixas desfocadas mudam com o vídeo; cabeçalho/letterbox estático não
+
+/** Repost "9:16 com fundo desfocado": o vídeo real fica no meio e acima/abaixo vão cópias
+ *  ampliadas e borradas dele. As faixas se mexem junto com o vídeo (movimento não as separa) e em
+ *  cenas escuras ou lisas a nitidez também não ajuda — mas há sempre uma EMENDA: a variação
+ *  vertical entre duas linhas vizinhas dispara exatamente onde o miolo encontra a faixa. As duas
+ *  emendas são simétricas (topo ≈ 1 - base), o que permite achar a mais fraca pela mais forte. */
+function detectBySeams(frames: Uint8Array[], width: number, height: number) {
+  const vertical = new Float32Array(height);
+  const horizontal = new Float32Array(height);
+  for (const frame of frames) {
+    for (let y = 0; y < height; y += 1) {
+      let v = 0;
+      let h = 0;
+      const base = y * width;
+      for (let x = 0; x < width; x += 1) {
+        if (y > 0) v += Math.abs(frame[base + x] - frame[base - width + x]);
+        if (x > 0) h += Math.abs(frame[base + x] - frame[base + x - 1]);
+      }
+      vertical[y] += v / width / frames.length;
+      horizontal[y] += h / width / frames.length;
+    }
+  }
+
+  const score = (y: number) => {
+    let context = 0;
+    let count = 0;
+    for (let d = 3; d <= 8; d += 1) {
+      if (y - d < 1 || y + d >= height) continue;
+      context += vertical[y - d] + vertical[y + d];
+      count += 2;
+    }
+    return count === 0 ? 0 : vertical[y] / (context / count + 0.3);
+  };
+
+  const from = Math.floor(height * SEAM_WINDOW_TOP[0]);
+  const to = Math.floor(height * SEAM_WINDOW_TOP[1]);
+  const tolerance = Math.max(1, Math.round(height * SEAM_SYMMETRY_ROWS));
+  let best: { top: number; bottom: number; total: number } | null = null;
+  for (let top = from; top < to; top += 1) {
+    const topScore = score(top);
+    if (topScore < SEAM_MIN_WEAK) continue;
+    const mirror = height - top;
+    for (let bottom = mirror - tolerance; bottom <= mirror + tolerance; bottom += 1) {
+      const bottomScore = score(bottom);
+      if (bottomScore < SEAM_MIN_WEAK || Math.max(topScore, bottomScore) < SEAM_MIN_STRONG) continue;
+      const total = topScore + bottomScore;
+      if (!best || total > best.total) best = { top, bottom, total };
+    }
+  }
+  if (!best) return null;
+
+  // Confere que o miolo é mais nítido que as faixas (quando há textura para comparar).
+  const mean = (a: number, z: number) => {
+    let sum = 0;
+    for (let y = a; y < z; y += 1) sum += horizontal[y];
+    return sum / Math.max(1, z - a);
+  };
+  const inside = mean(best.top + 2, best.bottom - 2);
+  const outside = (mean(0, best.top - 2) + mean(best.bottom + 2, height)) / 2;
+  if (inside > 1 && inside < outside * SEAM_MIN_SHARPNESS_GAIN) return null;
+
+  // Faixas estáticas (cabeçalho, legenda, letterbox) são outro caso — quem trata é o movimento/bordas.
+  let change = 0;
+  let samples = 0;
+  for (let k = 1; k < frames.length; k += 1) {
+    for (let y = 0; y < height; y += 1) {
+      if (y >= best.top - 2 && y < best.bottom + 2) continue;
+      for (let x = 0; x < width; x += 4) {
+        change += Math.abs(frames[k][y * width + x] - frames[0][y * width + x]);
+        samples += 1;
+      }
+    }
+  }
+  if (samples === 0) return null;
+  if (change / samples < SEAM_MIN_BAND_CHANGE && outside < SEAM_MIN_BAND_TEXTURE) return null;
+  return { left: 0, right: width, top: best.top, bottom: best.bottom };
+}
+
 /** `frames`: quadros em luma (width*height bytes cada), de momentos diferentes do vídeo. */
 export function detectContentRect(frames: Uint8Array[], width: number, height: number): ContentDetection {
   if (frames.length === 0 || width < 8 || height < 8) return { crop: { ...FULL }, method: "none", confidence: 0 };
 
   const area = (c: Crop) => c.width * c.height;
+
+  const sharp = frames.length >= 2 ? detectBySeams(frames, width, height) : null;
+  if (sharp) {
+    const crop = finalize(sharp, width, height);
+    if (area(crop) >= MIN_CONTENT_AREA && area(crop) <= MAX_USEFUL_AREA) return { crop, method: "seams", confidence: 0.9 };
+  }
 
   const motion = detectByMotion(frames, width, height);
   if (motion && motion.density >= MIN_MOTION_DENSITY) {
@@ -249,7 +364,10 @@ export function detectContentRect(frames: Uint8Array[], width: number, height: n
     // faixas uniformes das laterais (ou o quadro todo, se não houver).
     const sides = trimSideBars(averageFrame(frames, width * height), width, motion.top, motion.bottom);
     const mean = averageFrame(frames, width * height);
-    const refined = trimBackgroundEdges({ ...motion, left: sides.left, right: width - sides.right }, mean, width, height);
+    const motionBox = { ...motion, left: sides.left, right: width - sides.right };
+    const bg = backgroundLuma(mean, width, height, motionBox);
+    const textFree = bg === null ? motionBox : trimTextBands(motionBox, frames, width, bg);
+    const refined = trimBackgroundEdges(textFree, mean, width, height);
     const crop = finalize(refined, width, height);
     if (area(crop) >= MIN_CONTENT_AREA && area(crop) <= MAX_USEFUL_AREA) {
       return { crop, method: "motion", confidence: Math.min(1, motion.density * 1.5) };

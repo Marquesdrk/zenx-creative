@@ -548,6 +548,18 @@ export function EditDrawer({
                     >
                       {detectingTitles ? "Lendo títulos…" : onDetectTitlesBatch ? "Ler título do vídeo original (todos do lote)" : "Ler título do vídeo original"}
                     </button>
+                    {onApplyToBatch && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const count = onApplyToBatch(draft.batchId, draft.id, { ...draft.manualOverrides, title: overrides.title ?? profile.defaultTitle ?? "" }, ["title"]);
+                          setTitleStatus(count > 0 ? `Título aplicado a mais ${count} vídeo(s) do lote.` : "Este lote só tem este vídeo.");
+                        }}
+                        className="rounded-lg border border-accent/40 bg-accent/10 px-3 py-1.5 text-[11px] font-semibold text-[#B8B0FF] hover:bg-accent/20"
+                      >
+                        Usar este título em todos do lote
+                      </button>
+                    )}
                     {titleStatus && <span className="text-[11px] text-muted">{titleStatus}</span>}
                   </div>
                 </div>

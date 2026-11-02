@@ -16,6 +16,7 @@ import { useProfiles } from "@/lib/editor/profiles-store";
 import { useTemplates } from "@/lib/editor/templates-store";
 import { analyzeVideoSource, readVideoDimensions } from "@/lib/editor/source-analysis";
 import { applySharedOverrides, type SharedOverrideKey } from "@/lib/editor/shared-overrides";
+import { consensusCrop, shouldUseConsensus } from "@/lib/editor/layout-consensus";
 import { extractVideoTitle } from "@/lib/editor/title-ocr";
 import { GLOBAL_WATERMARK_DEFAULTS, resolveWatermarkDefaults } from "@/lib/editor/settings";
 import {
@@ -26,6 +27,7 @@ import {
   type BatchItem,
   type Crop,
   type Profile,
+  type SourceAnalysis,
 } from "@/lib/editor/types";
 
 function sameCropValues(a: Crop, b: Crop) {
@@ -36,7 +38,7 @@ function sameCropValues(a: Crop, b: Crop) {
 // workstation), which would serialize a GPU-backed batch. Keep three local encodes active;
 // serverless exports remain conservative to avoid exhausting function resources.
 const IS_VERCEL = Boolean(process.env.NEXT_PUBLIC_IS_VERCEL);
-const MAX_PARALLEL_RENDERS = IS_VERCEL ? 1 : 3;
+const MAX_PARALLEL_RENDERS = IS_VERCEL ? 1 : 4;
 type PendingExportPart = { downloadUrl: string; filename: string };
 type PendingExportParts = {
   batchId: string;
@@ -291,11 +293,13 @@ export default function EditorPage() {
     setItems((current) =>
       current.map((item) => (ids.has(item.id) && item.status !== "PROCESSING" ? { ...item, status: "ANALYZING" } : item))
     );
+    const results: SourceAnalysis[] = [];
     await mapWithConcurrency(targets, mode === "full" ? 6 : 12, async (item) => {
       if (!item.contentUrl) return;
       const analysis = await (mode === "full" ? analyzeVideoSource(item.contentUrl) : readVideoDimensions(item.contentUrl)).catch(
         () => null
       );
+      if (analysis) results.push(analysis);
       setItems((current) =>
         current.map((candidate) => {
           if (candidate.id !== item.id) return candidate;
@@ -315,6 +319,27 @@ export default function EditorPage() {
         })
       );
     });
+    if (mode === "full") applyLayoutConsensus(targets, results);
+  }
+
+  /** Vídeos do mesmo lote costumam ter o mesmo layout. Quando a maioria confirmou o mesmo recorte,
+   *  os que a detecção individual não conseguiu resolver (cena escura/lisa) seguem o padrão. */
+  function applyLayoutConsensus(targets: BatchItem[], results: SourceAnalysis[]) {
+    const consensus = consensusCrop(results);
+    if (!consensus) return;
+    const ids = new Set(targets.map((item) => item.id));
+    setItems((current) =>
+      current.map((candidate) => {
+        const analysis = candidate.sourceAnalysis;
+        if (!ids.has(candidate.id) || !analysis || !shouldUseConsensus(analysis, consensus)) return candidate;
+        const cropUntouched =
+          sameCropValues(candidate.manualOverrides.crop, FULL_FRAME_CROP) ||
+          sameCropValues(candidate.manualOverrides.crop, analysis.suggestedCrop);
+        return cropUntouched
+          ? { ...candidate, manualOverrides: { ...candidate.manualOverrides, crop: consensus } }
+          : candidate;
+      })
+    );
   }
 
   function handleReanalyzeBatch(batchId: string) {
@@ -640,6 +665,7 @@ export default function EditorPage() {
   }
 
   function handleSaveEdit(updated: BatchItem, applyToAll: boolean) {
+    const previousTitle = items.find((candidate) => candidate.id === updated.id)?.manualOverrides.title;
     const stagedIds = stagedItemsByBatch[updated.batchId] ?? [];
     const batch = batches.find((candidate) => candidate.id === updated.batchId);
     const profile = batch ? profiles.find((candidate) => candidate.id === batch.profileId) : null;
@@ -665,7 +691,12 @@ export default function EditorPage() {
         if (item.id === updated.id) return updated;
         if (applyToAll && item.batchId === updated.batchId) {
           // Só os ajustes do lote — título e recorte continuam sendo de cada vídeo.
-          return { ...item, manualOverrides: applySharedOverrides(item.manualOverrides, updated.manualOverrides) };
+          const shared = applySharedOverrides(item.manualOverrides, updated.manualOverrides);
+          // O título do vídeo aberto vai para os que estão vazios, no padrão do perfil ou iguais ao
+          // título que ele tinha antes — títulos próprios (ex.: lidos por OCR) são preservados.
+          const itemTitle = item.manualOverrides.title ?? "";
+          const replaceable = !itemTitle.trim() || itemTitle === (profile?.engine === "X_STYLE" ? profile.defaultTitle : undefined) || itemTitle === (previousTitle ?? "");
+          return replaceable ? { ...item, manualOverrides: { ...shared, title: updated.manualOverrides.title } } : { ...item, manualOverrides: shared };
         }
         return item;
       })

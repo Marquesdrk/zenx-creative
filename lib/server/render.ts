@@ -1196,6 +1196,37 @@ async function renderXStyle(
       }
     }
 
+    // Caminho rápido por CPU: texto + fundo viram UMA imagem (feita uma vez por vídeo) e o vídeo é
+    // sobreposto em yuv420 puro. Sobrepor PNGs RGBA quadro a quadro, em 1080x1920, era o que fazia
+    // um vídeo de 5 min levar quase 2 min para renderizar.
+    if (preparedBackgroundPath) {
+      const flatCanvasPath = outputPath.replace(/\.mp4$/i, "-flat.png");
+      try {
+        await composeXStyleBackground(preparedBackgroundPath, textOverlays, flatCanvasPath);
+        await run(
+          [
+            { path: contentPath, options: contentInputOptions(item) },
+            // Imagem lida UMA vez e repetida pelo filtro loop: "-loop 1" no PNG decodificava a
+            // imagem 1080x1920 inteira a cada quadro (cerca de 3x mais lento).
+            { path: flatCanvasPath },
+          ],
+          [
+            "[1:v]format=yuv420p,setsar=1,loop=loop=-1:size=1:start=0,setpts=N/(30*TB)[bg]",
+            `[0:v]${contentFilters.join(",")},format=yuv420p[content]`,
+            `[bg][content]overlay=x=${videoFrame.x}:y=${videoFrame.y}:shortest=1:format=yuv420[outv]`,
+          ],
+          outputPath,
+          item
+        );
+        return;
+      } catch (error) {
+        console.warn("[render] Composição rápida do X Style falhou; repetindo no modo compatível", error);
+        await rm(outputPath, { force: true });
+      } finally {
+        await rm(flatCanvasPath, { force: true });
+      }
+    }
+
     await run(
       [
         { path: contentPath, options: contentInputOptions(item) },
